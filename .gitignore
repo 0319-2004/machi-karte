@@ -8,6 +8,10 @@ data/*
 # DuckDB
 *.duckdb
 
+# 画像キャッシュ（Mapillary / オルソ / LOD2 テクスチャの取得物）
+data/cache/
+*.image_cache/
+
 # Python
 __pycache__/
 .venv/
