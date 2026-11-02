@@ -1,0 +1,16 @@
+# 環境変数
+.env
+
+# データ（data/README.md のみ管理対象）
+data/*
+!data/README.md
+
+# DuckDB
+*.duckdb
+
+# Python
+__pycache__/
+.venv/
+
+# Node
+node_modules/
