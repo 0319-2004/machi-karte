@@ -32,7 +32,12 @@ cp .env.example .env     # APIキー等を記入
 
 ## ライセンス
 
-未定（リポジトリのライセンスは ODbL / CC BY-SA の継承義務と整合させて決める。決定後にここへ記載）。
+- **このリポジトリのコードは [MIT ライセンス](LICENSE)**（Copyright (c) 2026 YNRTR）。
+- **`data/` はリポジトリに含めない。** 生データ・派生データ・キャッシュは各データ源のライセンスにそれぞれ従う。
+- **出力ファイル（更新候補リスト）には、使ったデータ源のライセンスが及ぶ。** `source` が `poi` / `osm_building` の行は OpenStreetMap 由来を含むため ODbL の対象になり得る。
+- **Mapillary の画像はリポジトリにも出力にも含めない**（参照 URL のみ。画面表示には帰属表示を付ける）。
+
+詳細は [`docs/attribution.md`](docs/attribution.md) の「ライセンス方針」を参照。
 
 ## 帰属表示
 

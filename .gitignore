@@ -12,6 +12,17 @@ data/*
 data/cache/
 *.image_cache/
 
+# 画像（docs/ と web/ の静的ファイルは除く）
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.png
+!web/**/*.jpg
+!web/**/*.jpeg
+!web/**/*.png
+
 # Python
 __pycache__/
 .venv/
