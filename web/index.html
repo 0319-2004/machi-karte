@@ -11,25 +11,36 @@
 <body>
   <div id="map"></div>
 
-  <!-- 件数カウンタ（画面上部） -->
+  <!-- 上部：絞り込みの件数カウンタ と 処理時間の計測 -->
   <header id="counter">
-    <span class="count" id="count-total">—</span>
-    <span class="arrow">→</span>
-    <span class="count target" id="count-target">—</span>
-    <span class="reduction" id="count-reduction"></span>
-    <button id="toggle">調査対象のみ</button>
+    <div class="counts">
+      <span class="count" id="count-total">—</span>
+      <span class="arrow">→</span>
+      <span class="count target" id="count-target">—</span>
+      <span class="reduction" id="count-reduction"></span>
+      <button id="toggle">調査対象のみ</button>
+    </div>
+    <!-- 計測（常時表示）：処理済み N棟 / 合計 M分 / 1棟あたり中央値 S秒 -->
+    <div id="metrics" class="metrics">
+      <div class="m"><span class="mv" id="m-processed">0</span><span class="ml">処理済み（棟）</span></div>
+      <div class="m"><span class="mv" id="m-total">0.0</span><span class="ml">合計（分）</span></div>
+      <div class="m"><span class="mv" id="m-median">–</span><span class="ml">中央値（秒/棟）</span></div>
+      <div class="m split"><span class="mv" id="m-keep">–</span><span class="ml">そのまま確定</span></div>
+      <div class="m split"><span class="mv" id="m-edit">–</span><span class="ml">修正して確定</span></div>
+    </div>
   </header>
 
-  <!-- 優先度順リスト -->
+  <!-- 左：優先度順リスト -->
   <aside id="sidebar">
-    <h2>優先度順リスト<small>（高さ降順・仮）</small></h2>
+    <h2>優先度順リスト<small id="sidebar-sub">（高さ→新規→面積→LOD2）</small></h2>
     <ol id="target-list"></ol>
   </aside>
 
-  <!-- 右：属性パネル -->
-  <section id="panel" class="hidden">
-    <button id="panel-close">×</button>
-    <div id="panel-body"></div>
+  <!-- 右：確認・確定カード（基本は1画面。はみ出す分だけ内側でスクロール） -->
+  <section id="confirm" class="hidden">
+    <button id="confirm-close" title="閉じる">×</button>
+    <div id="confirm-scroll"></div>
+    <div id="confirm-foot"></div>
   </section>
 
   <a id="attr-link" href="/attribution">帰属表示</a>
