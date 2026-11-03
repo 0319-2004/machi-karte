@@ -14,10 +14,16 @@ from pyproj import Transformer
 from shapely.geometry import MultiPolygon, Polygon
 
 # --- 名前空間（検証で確認した実データの定義） ---
+# bldg/core/gml は版をまたいで同じ。uro だけ版で異なる
+# （2025年度版=IUR 3.2 / 2023年度版=IUR 3.1）ため、localname で判定する。
 BLDG = "{http://www.opengis.net/citygml/building/2.0}"
 CORE = "{http://www.opengis.net/citygml/2.0}"
-URO = "{https://www.geospatial.jp/iur/uro/3.2}"
 GML = "{http://www.opengis.net/gml}"
+
+
+def _localname(tag) -> str:
+    """名前空間付きタグから localname を返す（uro の版差を吸収）。"""
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 # EPSG:6697 の水平成分は JGD2011 地理座標（EPSG:6668）と同じ。
 # 緯度経度 → 平面直角第9系（メートル）。always_xy=True なので入力は (lon, lat)。
@@ -136,6 +142,7 @@ def iter_buildings(gml_path: str, city_code: str | None = None):
         creation_date = None
         for c in b:
             tag = c.tag
+            local = _localname(tag)
             if tag == f"{BLDG}usage" and raw["usage"] is None:
                 raw["usage"] = _text(c)
             elif tag == f"{BLDG}storeysAboveGround":
@@ -144,16 +151,16 @@ def iter_buildings(gml_path: str, city_code: str | None = None):
                 raw["height"] = _text(c)
             elif tag == f"{CORE}creationDate":
                 creation_date = _text(c)
-            elif tag == f"{URO}buildingIDAttribute":
-                bia = c.find(f"{URO}BuildingIDAttribute")
+            elif local == "buildingIDAttribute":  # uro（版非依存）
+                bia = c.find("{*}BuildingIDAttribute")
                 if bia is not None:
-                    bid = _text(bia.find(f"{URO}buildingID"))
-            elif tag == f"{URO}buildingDetailAttribute":
-                bda = c.find(f"{URO}BuildingDetailAttribute")
+                    bid = _text(bia.find("{*}buildingID"))
+            elif local == "buildingDetailAttribute":  # uro（版非依存）
+                bda = c.find("{*}BuildingDetailAttribute")
                 if bda is not None:
-                    raw["detailed_usage"] = _text(bda.find(f"{URO}detailedUsage"))
-                    raw["survey_year"] = _text(bda.find(f"{URO}surveyYear"))
-                    raw["roof_edge_area"] = _text(bda.find(f"{URO}buildingRoofEdgeArea"))
+                    raw["detailed_usage"] = _text(bda.find("{*}detailedUsage"))
+                    raw["survey_year"] = _text(bda.find("{*}surveyYear"))
+                    raw["roof_edge_area"] = _text(bda.find("{*}buildingRoofEdgeArea"))
 
         prefix = (bid or "").split("-")[0]
         if city_code is None or prefix == city_code:

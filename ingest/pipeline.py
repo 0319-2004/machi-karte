@@ -30,58 +30,65 @@ from .normalize import (
 CITY_CODE = "13104"  # 新宿区
 INSERT_BATCH = 2000
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS buildings (
-    building_id        VARCHAR,
-    version            VARCHAR,
-    city_code          VARCHAR,
-    raw_usage          VARCHAR,  usage          VARCHAR,
-    raw_detailed_usage VARCHAR,  detailed_usage VARCHAR,
-    raw_storeys_above  VARCHAR,  storeys_above  INTEGER,
-    raw_survey_year    VARCHAR,  survey_year    VARCHAR,
-    raw_height         VARCHAR,  height_m       DOUBLE,
-    raw_roof_edge_area VARCHAR,  roof_edge_area DOUBLE,
-    creation_date      VARCHAR,
-    lod_type           VARCHAR,
-    is_target          BOOLEAN DEFAULT FALSE,
-    geom               GEOMETRY,   -- EPSG:6677（幾何演算用）
-    geom_4326          GEOMETRY,   -- EPSG:4326（表示・出力用）
-    PRIMARY KEY (building_id, version)
-);
-"""
-
-_INSERT = """
-INSERT INTO buildings (
-    building_id, version, city_code,
-    raw_usage, usage, raw_detailed_usage, detailed_usage,
-    raw_storeys_above, storeys_above, raw_survey_year, survey_year,
-    raw_height, height_m, raw_roof_edge_area, roof_edge_area,
-    creation_date, lod_type, geom, geom_4326
-) VALUES (
-    ?, ?, ?,
-    ?, ?, ?, ?,
-    ?, ?, ?, ?,
-    ?, ?, ?, ?,
-    ?, ?, ST_GeomFromText(?), ST_GeomFromText(?)
-)
-"""
+# buildings と同じ列構成。テーブル名だけ差し替えて版別テーブルにも使う
+# （2023年度版は buildings_2023 に取り込み、2025 の buildings を壊さない）。
+def schema_sql(table: str = "buildings") -> str:
+    return f"""
+    CREATE TABLE IF NOT EXISTS {table} (
+        building_id        VARCHAR,
+        version            VARCHAR,
+        city_code          VARCHAR,
+        raw_usage          VARCHAR,  usage          VARCHAR,
+        raw_detailed_usage VARCHAR,  detailed_usage VARCHAR,
+        raw_storeys_above  VARCHAR,  storeys_above  INTEGER,
+        raw_survey_year    VARCHAR,  survey_year    VARCHAR,
+        raw_height         VARCHAR,  height_m       DOUBLE,
+        raw_roof_edge_area VARCHAR,  roof_edge_area DOUBLE,
+        creation_date      VARCHAR,
+        lod_type           VARCHAR,
+        is_target          BOOLEAN DEFAULT FALSE,
+        geom               GEOMETRY,   -- EPSG:6677（幾何演算用）
+        geom_4326          GEOMETRY,   -- EPSG:4326（表示・出力用）
+        PRIMARY KEY (building_id, version)
+    );
+    """
 
 
-def connect(db_path: str) -> duckdb.DuckDBPyConnection:
+def insert_sql(table: str = "buildings") -> str:
+    return f"""
+    INSERT INTO {table} (
+        building_id, version, city_code,
+        raw_usage, usage, raw_detailed_usage, detailed_usage,
+        raw_storeys_above, storeys_above, raw_survey_year, survey_year,
+        raw_height, height_m, raw_roof_edge_area, roof_edge_area,
+        creation_date, lod_type, geom, geom_4326
+    ) VALUES (
+        ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ST_GeomFromText(?), ST_GeomFromText(?)
+    )
+    """
+
+
+def connect(db_path: str, table: str = "buildings") -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(db_path)
     con.execute("INSTALL spatial; LOAD spatial;")
-    con.execute(_SCHEMA)
+    con.execute(schema_sql(table))
     return con
 
 
-def load_version(con, data_dir: str, version: str) -> int:
-    """指定版の bldg GML を全ファイル読み込み、buildings に入れ直す。"""
+def load_version(con, data_dir: str, version: str, table: str = "buildings") -> int:
+    """指定版の bldg GML を全ファイル読み込み、table に入れ直す。"""
     bldg_dir = os.path.join(data_dir, "raw", "plateau", version, "udx", "bldg")
     files = sorted(glob.glob(os.path.join(bldg_dir, "*.gml")))
     if not files:
         raise FileNotFoundError(f"GML が見つからない: {bldg_dir}")
 
-    con.execute("DELETE FROM buildings WHERE version = ?", [version])
+    con.execute(schema_sql(table))
+    con.execute(f"DELETE FROM {table} WHERE version = ?", [version])
+    insert = insert_sql(table)
     total = 0
     no_geom = 0
     batch = []
@@ -103,11 +110,11 @@ def load_version(con, data_dir: str, version: str) -> int:
             ])
             total += 1
             if len(batch) >= INSERT_BATCH:
-                con.executemany(_INSERT, batch)
+                con.executemany(insert, batch)
                 batch.clear()
         print(f"  読み込み: {os.path.basename(f)}  累計 {total} 棟")
     if batch:
-        con.executemany(_INSERT, batch)
+        con.executemany(insert, batch)
     if no_geom:
         print(f"  ※ 外形(LOD0)が取れなかった棟: {no_geom}")
     return total
