@@ -155,5 +155,87 @@ def run() -> None:
             "c": results_c, "best_c": best_c}
 
 
+# 高さ帯別ベースラインで使う近傍定義（k近傍。常に候補があり帯で空にならない）
+BAND_NEIGHBOR_K = 5
+
+
+def run_bands(k: int = BAND_NEIGHBOR_K) -> dict:
+    """ベースライン (a)(b)(c) を高さ帯別に出す。
+
+    - (a) 最頻値 / (b) 近傍の用途（k近傍）/ (c) 近傍＋高さ±3m
+    - 帯ごとに holdout 棟数・不明群(is_target)棟数・正解率を並べる
+    - 不明群の高さ分布で重み付けした正解率（「不明群に近い条件での実力」）を1行
+    """
+    from .common import (BAND_LABELS, NeighborModel, band_of, load_known,
+                         target_band_weights, weighted_accuracy)
+
+    con = connect()
+    d = load_known(con)
+    tr = d["split"] == "train"
+    ho = d["split"] == "holdout"
+    model = NeighborModel(d["xy"][tr], d["usage"][tr], d["height"][tr],
+                          train_id=d["building_id"][tr])
+
+    ho_usage = d["usage"][ho]
+    ho_xy = d["xy"][ho]
+    ho_height = d["height"][ho]
+    ho_band = d["band"][ho]
+
+    pred_a = np.array([model.global_mode] * len(ho_usage), dtype=object)
+    pred_b = model.predict_many_knn(ho_xy, k)
+    pred_c = model.predict_many_knn(ho_xy, k, heights=ho_height, height_tol=HEIGHT_TOL)
+
+    weights = target_band_weights(con)
+    # 不明群の帯別棟数（height 非NULL）
+    tgt_counts = {b: 0 for b in BAND_LABELS}
+    tgt_rows = con.execute(
+        "SELECT height_m FROM buildings WHERE version=? AND is_target "
+        "AND height_m IS NOT NULL", [VERSION]
+    ).fetchall()
+    for r in tgt_rows:
+        b = band_of(r[0])
+        if b:
+            tgt_counts[b] += 1
+
+    print("\n=== ベースライン 高さ帯別（既知棟 holdout, 近傍 k=%d）===" % k)
+    print(f"  {'帯':<9}{'holdout':>8}{'不明群':>8}"
+          f"{'(a)最頻':>9}{'(b)近傍':>9}{'(c)+高さ':>9}")
+    band_acc = {"a": {}, "b": {}, "c": {}}
+    for label in BAND_LABELS:
+        m = ho_band == label
+        n = int(m.sum())
+        if n == 0:
+            continue
+        aa = float(np.mean(pred_a[m] == ho_usage[m])) * 100
+        ab = float(np.mean(pred_b[m] == ho_usage[m])) * 100
+        ac = float(np.mean(pred_c[m] == ho_usage[m])) * 100
+        band_acc["a"][label] = aa
+        band_acc["b"][label] = ab
+        band_acc["c"][label] = ac
+        print(f"  {label:<9}{n:>8}{tgt_counts[label]:>8}"
+              f"{aa:>8.1f}%{ab:>8.1f}%{ac:>8.1f}%")
+
+    # 全体（参考）
+    for key, pred in (("a", pred_a), ("b", pred_b), ("c", pred_c)):
+        band_acc[key]["_all"] = float(np.mean(pred == ho_usage)) * 100
+    print(f"  {'全体':<9}{len(ho_usage):>8}{sum(tgt_counts.values()):>8}"
+          f"{band_acc['a']['_all']:>8.1f}%{band_acc['b']['_all']:>8.1f}%"
+          f"{band_acc['c']['_all']:>8.1f}%")
+
+    # 不明群の高さ分布で重み付け（_all は除いて帯だけで加重）
+    def _wacc(key):
+        bands_only = {k2: v for k2, v in band_acc[key].items() if k2 != "_all"}
+        return weighted_accuracy(bands_only, weights)
+    wa, wb, wc = _wacc("a"), _wacc("b"), _wacc("c")
+    print(f"  {'不明群重み':<9}{'':>8}{'':>8}{wa:>8.1f}%{wb:>8.1f}%{wc:>8.1f}%")
+    print("  （重み＝不明群の高さ帯構成比：" +
+          " ".join(f"{b}={weights[b]*100:.0f}%" for b in BAND_LABELS) + "）")
+
+    con.close()
+    return {"band_acc": band_acc, "weights": weights,
+            "weighted": {"a": wa, "b": wb, "c": wc}, "tgt_counts": tgt_counts}
+
+
 if __name__ == "__main__":
     run()
+    run_bands()

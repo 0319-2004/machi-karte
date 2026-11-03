@@ -1,0 +1,191 @@
+# POI カテゴリ → PLATEAU 用途コードの対応表
+#
+# 用途コード（Building_usage.xml）:
+#   401 業務施設 / 402 商業施設 / 403 宿泊施設 / 404 商業系複合施設
+#   411 住宅 / 412 共同住宅 / 413 店舗等併用住宅 / 414 店舗等併用共同住宅
+#   415 作業所併用住宅 / 421 官公庁施設 / 422 文教厚生施設
+#   431 運輸倉庫施設 / 441 工場 / 451 農林漁業 / 452 供給処理施設
+#   453 防衛 / 454 その他
+#
+# POI はその建物の「地上部・主たる顔」を表すことが多い。住宅系（411/412）は
+# POI では基本つかめないため、POI からは主に 401/402/403/421/422/431 を当てる。
+# 高層の複合ビルでは地上 POI が1階しか表さない点に注意（設計書の既知の限界）。
+
+usage_labels:
+  "401": 業務施設
+  "402": 商業施設
+  "403": 宿泊施設
+  "411": 住宅
+  "412": 共同住宅
+  "421": 官公庁施設
+  "422": 文教厚生施設
+  "431": 運輸倉庫施設
+  "441": 工場
+  "452": 供給処理施設
+  "454": その他
+
+# Overture Maps Places の basic_category → 用途コード（高頻度を明示）
+overture:
+  restaurant: "402"
+  bar: "402"
+  cafe: "402"
+  coffee_shop: "402"
+  casual_eatery: "402"
+  fast_food_restaurant: "402"
+  non_alcoholic_beverage_venue: "402"
+  convenience_store: "402"
+  shopping: "402"
+  shopping_mall: "402"
+  fashion_and_apparel_store: "402"
+  food_and_beverage_store: "402"
+  electronics_store: "402"
+  hardware_home_and_garden_store: "402"
+  sporting_goods_store: "402"
+  flowers_and_gifts_store: "402"
+  books_music_and_video_store: "402"
+  arts_crafts_and_hobby_store: "402"
+  personal_care_and_beauty_store: "402"
+  second_hand_store: "402"
+  pharmacy_and_drug_store: "402"
+  personal_or_beauty_service: "402"
+  wellness_service: "402"
+  corporate_or_business_office: "401"
+  professional_service: "401"
+  b2b_office_and_professional_service: "401"
+  attorney_or_law_firm: "401"
+  financial_service: "401"
+  bank_or_credit_union: "401"
+  media_service: "401"
+  design_service: "401"
+  technical_service: "401"
+  printing_service: "401"
+  manufacturer: "441"
+  hotel: "403"
+  lodging: "403"
+  hospital: "422"
+  dental_clinic: "422"
+  specialized_health_care: "422"
+  health_care: "422"
+  diagnostics_imaging_or_lab_service: "422"
+  complementary_and_alternative_medicine: "422"
+  education: "422"
+  specialty_school: "422"
+  college_university: "422"
+  place_of_learning: "422"
+  tutoring_service: "422"
+  museum: "422"
+  art_gallery: "422"
+  arts_and_entertainment: "422"
+  theatre_venue: "422"
+  music_venue: "422"
+  gym: "422"
+  fitness_studio: "422"
+  sport_or_fitness_facility: "422"
+  park: "422"
+  buddhist_place_of_worship: "422"
+  christian_place_of_worship: "422"
+  religious_organization: "422"
+  social_or_community_service: "422"
+  civic_organization: "422"
+  historic_site: "422"
+  government_office: "421"
+  train_station: "431"
+  storage_facility: "431"
+  shipping_or_delivery_service: "431"
+# Overture の長い裾は、カテゴリ名の部分一致で補う（上の明示が優先）
+overture_keywords:
+  _store: "402"
+  _eatery: "402"
+  restaurant: "402"
+  _office: "401"
+  law_firm: "401"
+  clinic: "422"
+  health_care: "422"
+  _school: "422"
+  hospital: "422"
+  worship: "422"
+
+# OpenStreetMap POI（amenity/shop/office/tourism/leisure/healthcare）
+osm_poi:
+  by_tag:
+    amenity=restaurant: "402"
+    amenity=cafe: "402"
+    amenity=bar: "402"
+    amenity=pub: "402"
+    amenity=fast_food: "402"
+    amenity=bank: "402"
+    amenity=pharmacy: "402"
+    amenity=place_of_worship: "422"
+    amenity=school: "422"
+    amenity=university: "422"
+    amenity=college: "422"
+    amenity=kindergarten: "422"
+    amenity=library: "422"
+    amenity=hospital: "422"
+    amenity=clinic: "422"
+    amenity=doctors: "422"
+    amenity=dentist: "422"
+    office=government: "421"
+    tourism=hotel: "403"
+    tourism=hostel: "403"
+    tourism=guest_house: "403"
+    tourism=museum: "422"
+    tourism=gallery: "422"
+  by_key:   # value が by_tag に無いときの既定（key だけで判断）
+    shop: "402"
+    office: "401"
+    healthcare: "422"
+    leisure: "422"
+
+# OSM 建物タグ（source='osm_building'。building=* の値）
+osm_building:
+  house: "411"
+  detached: "411"
+  residential: "411"
+  bungalow: "411"
+  apartments: "412"
+  commercial: "402"
+  retail: "402"
+  supermarket: "402"
+  kiosk: "402"
+  office: "401"
+  hotel: "403"
+  industrial: "441"
+  factory: "441"
+  warehouse: "431"
+  public: "421"
+  civic: "421"
+  government: "421"
+  school: "422"
+  university: "422"
+  college: "422"
+  kindergarten: "422"
+  hospital: "422"
+  temple: "422"
+  church: "422"
+  shrine: "422"
+  mosque: "422"
+  # building=yes / roof / construction 等は用途不明として扱い、予測に使わない
+
+# 判断に迷うカテゴリ（poi.py の実行末尾に一覧として報告する）
+ambiguous:
+  - category: "coworking / シェアオフィス（overture: corporate_or_business_office 等に紛れる）"
+    note: "専有オフィス(401)か、賃貸・共用で商業寄り(402)か割れる。暫定 401。"
+  - category: "民泊・短期貸し（overture: lodging / short_term, OSM: tourism=apartment）"
+    note: "宿泊施設(403)か共同住宅(412)か。建物全体が住宅のこともあり暫定 403。"
+  - category: "駐車場（overture: parking, OSM: amenity=parking）"
+    note: "運輸倉庫(431)に寄せるか、建物用途ではなく付帯設備として除外するか。暫定 除外。"
+  - category: "real_estate_service / estate_agent（不動産業）"
+    note: "業務(401)だが、賃貸管理会社が共同住宅(412)の1階にいる例が多く用途を誤らせる。暫定 401。"
+  - category: "rental_service / rental_kiosk / レンタル"
+    note: "対象物により商業(402)〜運輸倉庫(431)。暫定 402。"
+  - category: "atm / vending_machine / post_box（建物用途を表さない点）"
+    note: "建物の主用途ではない付帯物。予測から除外する。"
+  - category: "building=yes（OSM 建物の 115,246 件）"
+    note: "用途情報なし。osm_building 予測から除外する。"
+
+# 予測に使わない（付帯物・用途情報なし）
+drop:
+  overture: [atm, parking]
+  osm_poi_tag: [amenity=parking, amenity=vending_machine, amenity=atm, amenity=bench, amenity=post_box, amenity=toilets, amenity=bicycle_rental]
+  osm_building_value: [yes, roof, construction, garage, garages, carport, "no"]
