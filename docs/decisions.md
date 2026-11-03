@@ -16,6 +16,20 @@
 
 ---
 
+## 2026-11-03 source の定義に osm_building を追加（design と実装の整合）
+
+- 背景 / きっかけ：ライセンス方針（`docs/attribution.md`）で「`source` が `poi` / `osm_building` の行は OSM 由来で ODbL 対象」と書いたが、設計書の `source` 列には `osm_building` が無く、CSV 側には `neighbor` も無かった。帰属表示・ライセンスの判定を source で機械的に当てるには、定義をそろえる必要がある。
+- 判断：
+  - candidates の `source` に **`osm_building`** を追加（`poi` / `osm_building` / `image` / `neighbor` / `height` / `version_diff`）。
+  - 更新候補リスト（CSV）の `source` に **`neighbor`** と **`osm_building`** を追加。
+  - 変更箇所に「2026-11-03 追記」を明記（`docs/design.md`）。
+- 根拠（理由）：**OSM の `building` タグ（apartments/commercial/office 等）を POI とは別のソースとして評価するため。** 2026-11-02 の分離（`osm_poi.geojson` 29,277 件／`osm_buildings.geojson` 183,227 件）で building タグは POI とは別物として保存済み。推定での寄与と ODbL 対象範囲を source 単位で区別できるようにする。
+- 影響範囲：
+  - ODbL の対象は `source ∈ {poi, osm_building}` の行。`neighbor` は PLATEAU 既知棟（近傍）由来なので OSM の対象ではない。`height` / `version_diff` も PLATEAU 由来（`docs/attribution.md` に1行補足済み）。
+  - Phase 2 後半の POI 結合（`estimate/poi.py`）で building タグを付けるときは `source='osm_building'` を使う。
+
+---
+
 ## 2026-11-03 Phase 2 前半：既知棟の定義・ホールドアウト・ベースライン（POI結合なし）
 
 - 背景 / きっかけ：POI 結合の前に、用途推定のベースラインを既知棟のホールドアウトで実測し、Day 1 判定（56.8% を超えるか）の土俵を固めた。

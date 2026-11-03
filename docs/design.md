@@ -88,7 +88,7 @@ CityGMLから1回だけ作る。
 | `attribute` | `usage` / `storeys` / `year_built` / `detailed_usage` |
 | `value` | 推定値。建築年は区間で持つので`value_min`と`value_max`も |
 | `confidence` | 0.0〜1.0 |
-| `source` | `poi` / `image` / `neighbor` / `height` / `version_diff` |
+| `source` | `poi` / `osm_building` / `image` / `neighbor` / `height` / `version_diff`（`osm_building` は 2026-11-03 追記。OSM の building タグを POI とは別ソースとして評価するため） |
 | `reasoning` | Claudeが返した根拠の文章 |
 | `evidence_ids` | 根拠になったPOIや画像への参照 |
 
@@ -301,7 +301,7 @@ AND survey_year = '0001'
 | `current_label` | `不明` |
 | `proposed_value` | 確定した値。`401` |
 | `proposed_label` | `業務施設` |
-| `source` | `poi` / `image` / `height` / `version_diff` |
+| `source` | `poi` / `osm_building` / `neighbor` / `image` / `height` / `version_diff`（`neighbor`・`osm_building` は 2026-11-03 追記。近傍推定を確定・出力できるようにし、OSM building タグを別ソースとして扱うため） |
 | `confidence` | 推定時の信頼度 |
 | `reasoning` | 推定の根拠（Claudeが返した文章） |
 | `confirmed_by` | 確定した人 |
