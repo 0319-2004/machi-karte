@@ -36,9 +36,11 @@ eval:
 	uv run python -m estimate.storeys --eval
 	uv run python -m eval.baselines
 
-# 更新候補リスト（CSV / GeoJSON）を出力する（export 実装は別フェーズ）
+# 更新候補リスト（CSV / GeoJSON / README）を出力する（確定済みのみ）
+# 他自治体は CITY_CODE を変える：make export CITY_CODE=13104
+CITY_CODE ?= 13104
 export:
-	@echo "TODO: uv run python -m export"
+	uv run python -m export --city-code $(CITY_CODE)
 
 # pytest を実行する
 test:

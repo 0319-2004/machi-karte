@@ -7,16 +7,19 @@
 from __future__ import annotations
 
 import html
+import json
 import os
+import re
 import statistics
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from export.update_candidates import csv_bytes, fetch_rows, geojson_obj
 from .build_geojson import build_if_missing
 from .codelists import load_usage_codes, usage_label_map
 from .db import DERIVED_DIR, VERSION, db_lock, get_con
@@ -321,23 +324,111 @@ def metrics() -> dict:
     }
 
 
+# --- 更新候補の出力（確定済みだけ。未確定・判断不能は出さない） ------------
+
+@app.get("/api/export/summary")
+def export_summary(city_code: str = "13104") -> dict:
+    with db_lock:
+        rows = fetch_rows(get_con(), city_code, VERSION)
+    return {"buildings": len({r["building_id"] for r in rows}), "rows": len(rows)}
+
+
+@app.get("/api/export.csv")
+def export_csv(city_code: str = "13104") -> Response:
+    with db_lock:
+        data = csv_bytes(fetch_rows(get_con(), city_code, VERSION))
+    return Response(
+        content=data, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="update_candidates_{city_code}.csv"'},
+    )
+
+
+@app.get("/api/export.geojson")
+def export_geojson(city_code: str = "13104") -> Response:
+    with db_lock:
+        con = get_con()
+        obj = geojson_obj(con, fetch_rows(con, city_code, VERSION), VERSION)
+    data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    return Response(
+        content=data, media_type="application/geo+json",
+        headers={"Content-Disposition":
+                 f'attachment; filename="update_candidates_{city_code}.geojson"'},
+    )
+
+
+def _render_markdown(md: str) -> str:
+    """attribution.md 用の最小 Markdown → HTML（見出し・表・太字・リンク・リスト）。"""
+    def inline(s: str) -> str:
+        s = html.escape(s)
+        s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
+                   r'<a href="\2" target="_blank" rel="noopener">\1</a>', s)
+        s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+        s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        return s
+
+    html_parts: list[str] = []
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("## "):
+            html_parts.append(f"<h2>{inline(line[3:])}</h2>")
+        elif line.startswith("# "):
+            html_parts.append(f"<h1>{inline(line[2:])}</h1>")
+        elif line.startswith("|"):  # 表ブロック
+            tbl = []
+            while i < len(lines) and lines[i].startswith("|"):
+                tbl.append(lines[i])
+                i += 1
+            cells = [[c.strip() for c in r.strip("|").split("|")] for r in tbl]
+            body = [r for r in cells if not all(set(c) <= set("-: ") for c in r)]
+            out = ["<table>"]
+            for n, r in enumerate(body):
+                tag = "th" if n == 0 else "td"
+                out.append("<tr>" + "".join(f"<{tag}>{inline(c)}</{tag}>" for c in r) + "</tr>")
+            out.append("</table>")
+            html_parts.append("".join(out))
+            continue
+        elif line.startswith("- "):
+            items = []
+            while i < len(lines) and lines[i].startswith("- "):
+                items.append(f"<li>{inline(lines[i][2:])}</li>")
+                i += 1
+            html_parts.append("<ul>" + "".join(items) + "</ul>")
+            continue
+        elif line.strip():
+            html_parts.append(f"<p>{inline(line)}</p>")
+        i += 1
+    return "\n".join(html_parts)
+
+
 @app.get("/attribution", response_class=HTMLResponse)
 def attribution() -> str:
     path = os.path.join(DOCS_DIR, "attribution.md")
     try:
         with open(path, encoding="utf-8") as f:
-            text = f.read()
+            body = _render_markdown(f.read())
     except FileNotFoundError:
-        text = "attribution.md が見つかりません。"
+        body = "<p>attribution.md が見つかりません。</p>"
     return (
         "<!DOCTYPE html><html lang='ja'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<title>帰属表示 — まちカルテ</title>"
-        "<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:40px auto;"
-        "padding:0 16px;line-height:1.7;color:#222}pre{white-space:pre-wrap;"
-        "background:#f6f6f6;padding:16px;border-radius:8px}a{color:#1565c0}</style>"
-        "</head><body><p><a href='/'>← 地図に戻る</a></p>"
-        f"<pre>{html.escape(text)}</pre></body></html>"
+        "<style>body{font-family:system-ui,'Hiragino Sans',sans-serif;max-width:820px;"
+        "margin:40px auto;padding:0 20px;line-height:1.75;color:#263238}"
+        "h1{font-size:24px}h2{font-size:17px;margin-top:28px;border-bottom:1px solid #eee;"
+        "padding-bottom:4px}table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}"
+        "th,td{border:1px solid #e0e0e0;padding:7px 10px;text-align:left;vertical-align:top}"
+        "th{background:#f5f5f5}code{background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:13px}"
+        "a{color:#1565c0}.back{display:inline-block;margin-bottom:8px}"
+        ".dl{margin:18px 0;padding:12px 16px;background:#fff8e1;border-radius:8px;font-size:14px}</style>"
+        "</head><body><a class='back' href='/'>← 地図に戻る</a>"
+        f"{body}"
+        "<div class='dl'>更新候補リストのダウンロード："
+        "<a href='/api/export.csv'>CSV</a> / <a href='/api/export.geojson'>GeoJSON</a>"
+        "（人が確定した属性のみ。未確定・判断不能は含みません）</div>"
+        "</body></html>"
     )
 
 

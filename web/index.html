@@ -43,6 +43,13 @@
     <div id="confirm-foot"></div>
   </section>
 
+  <!-- 更新候補のダウンロード（確定済みのみ。未確定・判断不能は含まない） -->
+  <div id="download">
+    <span id="dl-count">更新候補 0 件</span>
+    <a id="dl-csv" href="/api/export.csv" download>CSV</a>
+    <a id="dl-geojson" href="/api/export.geojson" download>GeoJSON</a>
+  </div>
+
   <a id="attr-link" href="/attribution">帰属表示</a>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>

@@ -74,6 +74,15 @@ async function loadMetrics() {
   document.getElementById("m-edit").textContent = fmt(m.edit);
 }
 
+// --- 更新候補のダウンロード（確定済み件数で有効/無効） --------------------
+async function loadExportSummary() {
+  const s = await (await fetch("/api/export/summary")).json();
+  const el = document.getElementById("download");
+  document.getElementById("dl-count").textContent =
+    `更新候補 ${s.buildings} 棟・${s.rows} 件`;
+  el.classList.toggle("empty", s.rows === 0);
+}
+
 // --- 建物レイヤ -------------------------------------------------------------
 function addBuildingLayers() {
   map.addSource("buildings", { type: "geojson", data: "/data/buildings.geojson" });
@@ -269,6 +278,7 @@ async function doConfirm(accepted) {
   if (t) t.confirmed = true;
   renderList();
   loadMetrics();
+  loadExportSummary();
   openNext(id);   // 確定後は次の優先棟を自動で開く（連続処理を見せる）
 }
 
@@ -294,5 +304,6 @@ document.addEventListener("keydown", (e) => {
 loadStats();
 loadUsageCodes();
 loadMetrics();
+loadExportSummary();
 loadTargets();
 map.on("load", addBuildingLayers);

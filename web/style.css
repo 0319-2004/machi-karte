@@ -125,3 +125,17 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Hiragino Sans", s
   background: rgba(255,255,255,0.9); padding: 6px 12px; border-radius: 6px;
   font-size: 12px; color: #1565c0; text-decoration: none;
 }
+
+/* 更新候補のダウンロード（下部中央、帰属表示の上） */
+#download {
+  position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%); z-index: 2;
+  background: rgba(255,255,255,0.95); padding: 8px 14px; border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px;
+  font-size: 13px;
+}
+#download #dl-count { font-weight: 700; color: #37474f; }
+#download a { padding: 5px 12px; border-radius: 7px; background: #1565c0; color: #fff;
+  text-decoration: none; font-weight: 700; font-size: 13px; }
+#download a:hover { background: #0d47a1; }
+#download.empty a { background: #cfd8dc; color: #eceff1; pointer-events: none; }
+#download.empty #dl-count { color: #90a4ae; }

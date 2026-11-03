@@ -16,6 +16,31 @@
 
 ---
 
+## 2026-11-03 Phase 9 更新候補の出力：確定済みだけを CSV(BOM)/GeoJSON で出す
+
+- 背景 / きっかけ：骨格「抽出→推定→確認・確定→出力」の最後が未実装だった。画像を後回しにして
+  先に一本通す。設計書「第4段：更新候補の出力」の列定義どおり。
+- 判断：
+  1. **`confirmations` にある属性だけを出す**（人が確定したもの）。**未確定・判断不能は構造的に出ない**
+     （confirmations を主にするため）。`tests/test_export.py` で「未確定・判断不能が1行も出ない」を固定。
+  2. **CSV は UTF-8 BOM 付き**（Excel 文字化け防止）。`current_value` は raw_*（461/9999）の生値。
+     建築年は `proposed_value='2022-2024'` ＋ `value_min`/`value_max` 別列。GeoJSON(EPSG:4326) も同内容＋外形。
+  3. **人が修正した行は `source='manual'`・confidence/reasoning 空**（候補の値ではないため）。
+     そのまま確定は candidate の source/confidence/reasoning をそのまま。→ 設計の source 集合に
+     実務上 `manual` を足す扱い（出力列の意味を正直にするため）。
+  4. **city_code を引数化**（既定 13104）。他自治体でも同じ処理が通ることをコードで示す（実行は新宿区のみ）。
+     出力同梱 README に **PLATEAU 属性↔出力列の対応表**（uro:buildingID / bldg:usage /
+     bldg:storeysAboveGround / uro:yearOfConstruction）を入れ、「公式データへの直接書き込みではない」と明記。
+  5. 地図画面に **「更新候補をダウンロード」**（確定0件は無効、件数表示）。`/attribution` を整形（表・
+     Mapillary 注記・ダウンロード導線）。API は `GET /api/export.csv` / `.geojson` / `/summary`。
+- 根拠（動作確認）：デモ確定 9 棟 → `make export` で 9 棟 / 21 行。CSV 先頭に BOM、current=461/9999、
+  proposed=ラベル、新規棟は year_built が `2022-2024`。未確定棟は出ない。`uv run pytest tests/test_export.py` 緑。
+- 影響範囲：`export/update_candidates.py`・`export/__main__.py`・`export/README.md`、
+  `api/main.py`（export 3 本＋attribution 整形）、`web/`（ダウンロード）、`Makefile`（export 実体化）、
+  `tests/test_export.py`。出力は `data/derived/export/`（git 管理外）。
+
+---
+
 ## 2026-11-03 画像は後回し：Mapillary 被覆が約半分（向き未考慮）→ 画像の役割を整理し直す
 
 - 背景 / きっかけ：Mapillary カバレッジの実測（下記エントリ）を受けた方針決定。
