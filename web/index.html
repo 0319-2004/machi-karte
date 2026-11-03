@@ -3,9 +3,38 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>まちカルテ</title>
+  <title>まちカルテ — 新宿区の不明群</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- MapLibre の地図と確認画面をここに作る -->
+  <div id="map"></div>
+
+  <!-- 件数カウンタ（画面上部） -->
+  <header id="counter">
+    <span class="count" id="count-total">—</span>
+    <span class="arrow">→</span>
+    <span class="count target" id="count-target">—</span>
+    <span class="reduction" id="count-reduction"></span>
+    <button id="toggle">調査対象のみ</button>
+  </header>
+
+  <!-- 優先度順リスト -->
+  <aside id="sidebar">
+    <h2>優先度順リスト<small>（高さ降順・仮）</small></h2>
+    <ol id="target-list"></ol>
+  </aside>
+
+  <!-- 右：属性パネル -->
+  <section id="panel" class="hidden">
+    <button id="panel-close">×</button>
+    <div id="panel-body"></div>
+  </section>
+
+  <a id="attr-link" href="/attribution">帰属表示</a>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

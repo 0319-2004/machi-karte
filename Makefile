@@ -1,13 +1,17 @@
-.PHONY: ingest serve eval export test
+.PHONY: ingest serve geojson eval export test
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
 VERSION ?= 2025
 ingest:
 	@echo "TODO: uv run python -m ingest --version $(VERSION)"
 
-# FastAPI を起動する
+# 地図UI 用の建物ポリゴン GeoJSON を生成する（data/derived/buildings.geojson）
+geojson:
+	uv run python -m api.build_geojson
+
+# FastAPI を起動する（http://localhost:8000/ 。初回は geojson を自動生成）
 serve:
-	@echo "TODO: uv run uvicorn api.main:app --reload"
+	uv run uvicorn api.main:app --reload --port 8000
 
 # 既知棟での精度検証を実行する
 eval:

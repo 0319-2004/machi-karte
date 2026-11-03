@@ -16,6 +16,22 @@
 
 ---
 
+## 2026-11-03 Phase 3 地図UI：建物ポリゴンは GeoJSON ＋ gzip で配信する
+
+- 背景 / きっかけ：全 57,780 棟を地図に出すため、配信フォーマットを決める必要があった
+  （設計書の指示：「まずサイズと描画速度を測り、重ければ PMTiles か FlatGeobuf に切り替える」）。
+- 判断：**GeoJSON 一括配信 ＋ gzip（`GZipMiddleware`）で進める。** PMTiles/FlatGeobuf への変換は
+  いまは入れない（描画が実機で重いと分かった時点で切り替える）。
+- 根拠（実測。`api/build_geojson.py` と同じ SQL で計測）：
+  - プロパティを id / is_target / height_m / usage に絞った GeoJSON は **生 28.1MB / gzip 6.7MB（4.2倍）**、
+    生成 ~3.3s。実配信（`/data/buildings.geojson`）の gzip 転送は約 6.6MB。
+  - localhost 配信 6.6MB ＋ MapLibre の `fill-extrusion` は GPU 描画で 5.7万ポリゴンは実用域。
+    ビルド工程（tippecanoe 等の外部ツール）を増やさずに済む利点が大きい。
+- 影響範囲：生成物は `data/derived/buildings.geojson`（git 管理外、起動時に無ければ自動生成）。
+  描画が重い端末が出たら、同じ属性で FlatGeobuf 化（`/data` 配信）または PMTiles 化に切り替える。
+
+---
+
 ## 2026-11-03 Phase 2 判定の採用：用途は「候補提示」にとどめる
 
 - 背景 / きっかけ：Phase 2 後半の実測（下記エントリ）を受けて、設計書「Day 1 の分岐」で

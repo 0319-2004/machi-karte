@@ -1,0 +1,63 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: system-ui, "Hiragino Sans", sans-serif; }
+#map { position: absolute; inset: 0; }
+
+/* 件数カウンタ（上部中央の大きな数字） */
+#counter {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 2; display: flex; align-items: center; gap: 14px;
+  background: rgba(255,255,255,0.92); padding: 12px 22px; border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+}
+#counter .count { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em; color: #37474f; }
+#counter .count.target { color: #e64a19; }
+#counter .arrow { font-size: 28px; color: #90a4ae; }
+#counter .reduction { font-size: 18px; font-weight: 700; color: #e64a19; min-width: 76px; }
+#toggle {
+  margin-left: 10px; padding: 10px 16px; border: 0; border-radius: 8px; cursor: pointer;
+  background: #e64a19; color: #fff; font-size: 15px; font-weight: 700;
+}
+#toggle:hover { background: #d84315; }
+
+/* 優先度順リスト（左） */
+#sidebar {
+  position: absolute; top: 96px; left: 16px; bottom: 16px; width: 280px; z-index: 2;
+  background: rgba(255,255,255,0.95); border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column; box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+#sidebar h2 { margin: 0; padding: 14px 16px; font-size: 15px; border-bottom: 1px solid #eee; }
+#sidebar h2 small { color: #999; font-weight: 400; margin-left: 6px; font-size: 12px; }
+#target-list { margin: 0; padding: 0; list-style: none; overflow-y: auto; }
+#target-list li {
+  padding: 10px 16px; border-bottom: 1px solid #f2f2f2; cursor: pointer; font-size: 13px;
+}
+#target-list li:hover { background: #fff3e0; }
+#target-list li.active { background: #ffe0b2; }
+#target-list .bid { font-weight: 700; color: #37474f; }
+#target-list .meta { color: #78909c; margin-top: 2px; }
+
+/* 属性パネル（右） */
+#panel {
+  position: absolute; top: 96px; right: 16px; bottom: 16px; width: 320px; z-index: 2;
+  background: rgba(255,255,255,0.97); border-radius: 12px; padding: 16px; overflow-y: auto;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+#panel.hidden { display: none; }
+#panel-close { position: absolute; top: 8px; right: 10px; border: 0; background: none;
+  font-size: 22px; cursor: pointer; color: #999; }
+#panel h3 { margin: 0 24px 10px 0; font-size: 16px; }
+#panel .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px;
+  font-weight: 700; color: #fff; background: #e64a19; margin-bottom: 10px; }
+#panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#panel th, #panel td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #f0f0f0;
+  vertical-align: top; }
+#panel th { color: #78909c; font-weight: 600; width: 42%; }
+#panel .raw { color: #b0bec5; font-size: 11px; }
+#panel .note { color: #90a4ae; font-size: 12px; margin-top: 12px; }
+
+#attr-link {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2;
+  background: rgba(255,255,255,0.9); padding: 6px 12px; border-radius: 6px;
+  font-size: 12px; color: #1565c0; text-decoration: none;
+}
