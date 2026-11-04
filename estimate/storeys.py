@@ -26,7 +26,8 @@ from collections import Counter
 import numpy as np
 
 from api.schema import ensure_tables
-from eval.common import NeighborModel, band_of, connect, load_known
+from eval.common import (BAND_LABELS, NeighborModel, band_of, connect,
+                         load_known, target_band_weights, weighted_accuracy)
 from eval.holdout import VERSION
 
 # 設計書で示された用途別階高の実測値（照合用）
@@ -127,10 +128,19 @@ def usage_confidence(height) -> float:
 
 
 def storeys_confidence(height) -> float:
-    """階数（高さ÷階高）の信頼度：基本は高。45m超は下げる（誤差大）。"""
+    """階数（高さ÷階高）の信頼度：<20m=高 / 20〜45m=中 / 45m超=低。
+
+    帯別の精度（decisions.md 2026-11-04）に合わせる。±1階率は <20m で 94〜97%、
+    20〜45m で 67%、45m超で 40% まで落ちるため、20m以上は候補扱いに下げる。
+    画面ラベル（api.confidence_label）は 0.8→高 / 0.5→中 / 0.3→低 に対応。
+    """
     if height is None or np.isnan(height):
         return 0.0
-    return 0.35 if height > 45.0 else 0.8
+    if height > 45.0:
+        return 0.3      # 低（±1階でも約40%）
+    if height >= 20.0:
+        return 0.5      # 中（20〜45m：完全一致27%・±1階67%）
+    return 0.8          # 高（<20m：±1階94〜97%）
 
 
 # --- POI/OSM を evidence に、併用住宅フラグ ----------------------------------
@@ -234,7 +244,9 @@ def run_estimate(con, version: str = VERSION) -> dict:
             s_conf = storeys_confidence(h)
             s_reason = (f"高さ {h:.1f}m ÷ 推定階高 {floor_h:.2f}m（{fh_label}）≒ {n}階。")
             if h > 45.0:
-                s_reason += "高層のため誤差が大きい。"
+                s_reason += "高層（45m超）は階高のばらつきが大きく、階数は候補（±1階でも外れやすい）。"
+            elif h >= 20.0:
+                s_reason += "高さ20m以上は階高のばらつきが大きく、階数は目安（±1階程度）。"
             cand_rows.append([bid, version, "storeys", str(n), None, None,
                               s_conf, "height", s_reason, [], False])
         else:
@@ -259,47 +271,103 @@ def run_estimate(con, version: str = VERSION) -> dict:
 
 # --- ホールドアウトでの階数精度 ---------------------------------------------
 
-def evaluate_storeys(con, version: str = VERSION) -> dict:
-    """ホールドアウトで階数の完全一致率と ±1階の率を出す（設計書 62.3%/92.1%）。
+def _pct(num: int, den: int):
+    return (num / den * 100) if den else None
 
-    階高は train から学習し、holdout で評価する。比較のため「用途別階高」と
-    「一律3.8m」の両方を出す（設計書の 62.3/92.1 は一律3.8の数字）。
+
+def _band_score(rows, floor_fn) -> dict:
+    """行ごとに floor_fn(i, usage, height)→階高 で予測し、帯別と全体の
+    完全一致率・±1階率を返す。floor_fn が返す階高で height÷階高を丸める。"""
+    agg = {label: [0, 0, 0] for label in BAND_LABELS}    # [exact, within1, n]
+    tot = [0, 0, 0]
+    for i, (usage, h, st, *_rest) in enumerate(rows):
+        pred = predict_storeys(h, floor_fn(i, usage, h))
+        e = 1 if pred == st else 0
+        w = 1 if abs(pred - st) <= 1 else 0
+        band = band_of(h)
+        if band in agg:
+            agg[band][0] += e; agg[band][1] += w; agg[band][2] += 1
+        tot[0] += e; tot[1] += w; tot[2] += 1
+    band_exact = {b: _pct(agg[b][0], agg[b][2]) for b in BAND_LABELS}
+    band_w1 = {b: _pct(agg[b][1], agg[b][2]) for b in BAND_LABELS}
+    band_n = {b: agg[b][2] for b in BAND_LABELS}
+    return {
+        "band_exact": band_exact, "band_w1": band_w1, "band_n": band_n,
+        "overall": (_pct(tot[0], tot[2]), _pct(tot[1], tot[2])),
+    }
+
+
+def evaluate_storeys(con, version: str = VERSION) -> dict:
+    """ホールドアウトで階数の精度を**高さ帯別**に出す（設計書 62.3%/92.1% と照合）。
+
+    階高は train から学習し、holdout 全体で評価する（リーク防止）。仮推定（高さ÷階高）を
+    3つの階高の当て方で比較する:
+      - flat3.8      : 一律 3.8m（設計書の 62.3/92.1 はこれ）
+      - 用途別・真   : holdout 棟の真の用途の階高（上限の目安。不明群では使えない）
+      - 不明群相当   : 近傍(train)で予測した用途の階高（= 本番 run_estimate と同じ当て方）
+    各方式で帯別と、不明群の高さ分布で重み付けした値を出す。
     """
     fh = learn_floor_heights(con, version, split="train")
     rows = con.execute(
         """
-        SELECT b.usage, b.height_m, b.storeys_above
+        SELECT b.usage, b.height_m, b.storeys_above,
+               ST_X(ST_Centroid(b.geom)), ST_Y(ST_Centroid(b.geom))
         FROM buildings b
         JOIN eval_split s ON b.building_id=s.building_id AND b.version=s.version
-        WHERE b.version=? AND s.split='holdout'
+        WHERE b.version=? AND s.split='holdout' AND b.geom IS NOT NULL
           AND b.height_m IS NOT NULL AND b.storeys_above IS NOT NULL
           AND b.storeys_above >= 1
         """,
         [version],
     ).fetchall()
 
-    def score(use_usage: bool, flat: float | None):
-        exact = within1 = 0
-        for usage, h, st in rows:
-            if flat is not None:
-                floor_h = flat
-            else:
-                floor_h, _ = floor_height_for(usage if use_usage else None, fh)
-            pred = predict_storeys(h, floor_h)
-            if pred == st:
-                exact += 1
-            if abs(pred - st) <= 1:
-                within1 += 1
-        n = len(rows)
-        return exact / n * 100, within1 / n * 100
+    # 近傍（train のみ）で holdout 棟の用途を予測 → 本番と同じ「不明群相当」の当て方
+    known = load_known(con, version)
+    tr = known["split"] == "train"
+    model = NeighborModel(known["xy"][tr], known["usage"][tr], known["height"][tr],
+                          known["building_id"][tr])
+    xy = np.array([[r[3], r[4]] for r in rows], dtype=float)
+    heights = np.array([r[1] for r in rows], dtype=float)
+    pred_usage = model.predict_many_knn(xy, NEIGHBOR_K, heights=heights,
+                                         height_tol=HEIGHT_TOL)
 
-    flat_exact, flat_w1 = score(False, 3.8)
-    byu_exact, byu_w1 = score(True, None)
+    weights = target_band_weights(con, version)
+
+    methods = {
+        "flat3.8": _band_score(rows, lambda i, u, h: 3.8),
+        "用途別・真": _band_score(rows, lambda i, u, h: floor_height_for(u, fh)[0]),
+        "不明群相当": _band_score(rows, lambda i, u, h: floor_height_for(pred_usage[i], fh)[0]),
+    }
+    for m in methods.values():
+        m["w_exact"] = weighted_accuracy(m["band_exact"], weights)
+        m["w_w1"] = weighted_accuracy(m["band_w1"], weights)
+
+    # --- 原因分析 ---------------------------------------------------------
+    # (a) 実際の階高（height/storeys, クリップ無し）の帯別中央値と、適用した階高の差
+    by_band_actual = {b: [] for b in BAND_LABELS}
+    for usage, h, st, *_ in rows:
+        band = band_of(h)
+        if band in by_band_actual:
+            by_band_actual[band].append(h / st)
+    actual_fh = {
+        b: {"median": float(np.median(v)) if v else None, "n": len(v)}
+        for b, v in by_band_actual.items()
+    }
+    # (b) 「不明群相当」で、近傍予測用途の階高が学習済みに無く全体中央値へ落ちた割合（帯別）
+    fb = {b: [0, 0] for b in BAND_LABELS}     # [fallback, n]
+    for i, (usage, h, st, *_) in enumerate(rows):
+        band = band_of(h)
+        pu = pred_usage[i]
+        used_fallback = not (pu is not None and pu in fh["by_usage"])
+        if band in fb:
+            fb[band][1] += 1
+            if used_fallback:
+                fb[band][0] += 1
+    fallback = {b: _pct(fb[b][0], fb[b][1]) for b in BAND_LABELS}
+
     return {
-        "n": len(rows),
-        "flat_3.8": (flat_exact, flat_w1),
-        "by_usage": (byu_exact, byu_w1),
-        "floor_heights": fh,
+        "n": len(rows), "weights": weights, "methods": methods,
+        "actual_fh": actual_fh, "fallback": fallback, "floor_heights": fh,
     }
 
 
@@ -315,16 +383,52 @@ def _print_floor_heights(fh: dict) -> None:
     print(f"    全体中央値: {fh['overall']:.2f}m")
 
 
+def _p(x) -> str:
+    return "  --  " if x is None else f"{x:5.1f}%"
+
+
+def _print_method(label: str, m: dict, note: str = "") -> None:
+    print(f"\n  [{label}]{note}")
+    print(f"    {'帯':<8}{'完全一致':>8}{'±1階':>8}{'n':>8}")
+    for b in BAND_LABELS:
+        print(f"    {b:<8}{_p(m['band_exact'][b]):>8}{_p(m['band_w1'][b]):>8}"
+              f"{m['band_n'][b]:>8}")
+    oe, ow = m["overall"]
+    print(f"    {'全体':<8}{_p(oe):>8}{_p(ow):>8}")
+    print(f"    {'不明群重み':<7}{_p(m['w_exact']):>8}{_p(m['w_w1']):>8}")
+
+
+def _print_eval(res: dict) -> None:
+    print("=== 階数の精度（ホールドアウト n=%d, 高さ帯別）===" % res["n"])
+    _print_floor_heights(res["floor_heights"])
+    w = res["weights"]
+    print("\n  不明群の高さ分布（重み）: "
+          + " / ".join(f"{b} {w.get(b, 0)*100:.1f}%" for b in BAND_LABELS))
+    _print_method("flat3.8（設計書 62.3/92.1 はこの方式）", res["methods"]["flat3.8"])
+    _print_method("用途別階高・真の用途（上限の目安／不明群では使えない）",
+                  res["methods"]["用途別・真"])
+    _print_method("不明群相当（近傍予測用途の階高＝本番 run_estimate と同じ）",
+                  res["methods"]["不明群相当"])
+
+    print("\n  === 20m以上で落ちる原因 ===")
+    print("  実際の階高（中央値 height/storeys, クリップ無し）と一律3.8mの差:")
+    print(f"    {'帯':<8}{'実測階高':>9}{'3.8との差':>10}{'n':>8}")
+    for b in BAND_LABELS:
+        a = res["actual_fh"][b]
+        if a["median"] is None:
+            print(f"    {b:<8}{'--':>9}{'--':>10}{0:>8}")
+        else:
+            print(f"    {b:<8}{a['median']:8.2f}m{a['median']-3.8:+9.2f}m{a['n']:>8}")
+    print("  近傍予測用途の階高が全体中央値へフォールバックした割合（帯別）:")
+    for b in BAND_LABELS:
+        print(f"    {b:<8}{_p(res['fallback'][b])}")
+
+
 def run(do_eval: bool) -> None:
     con = connect()
     if do_eval:
         res = evaluate_storeys(con)
-        print("=== 階数の精度（ホールドアウト n=%d）===" % res["n"])
-        _print_floor_heights(res["floor_heights"])
-        fe, fw = res["flat_3.8"]
-        be, bw = res["by_usage"]
-        print(f"\n  一律3.8m     : 完全一致 {fe:.1f}% / ±1階 {fw:.1f}%（設計書 62.3% / 92.1%）")
-        print(f"  用途別階高   : 完全一致 {be:.1f}% / ±1階 {bw:.1f}%")
+        _print_eval(res)
     else:
         res = run_estimate(con)
         print("=== 不明群への推定投入 ===")
