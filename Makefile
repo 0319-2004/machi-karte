@@ -1,5 +1,5 @@
 .PHONY: ingest ingest-2023 schema estimate version-diff geojson serve eval export test \
-        reset-confirmations pipeline
+        reset-confirmations pipeline claude-infer claude-eval
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
 VERSION ?= 2025
@@ -35,6 +35,19 @@ eval:
 	uv run python -m eval.holdout
 	uv run python -m estimate.storeys --eval
 	uv run python -m eval.baselines
+
+# Claude API で不明群の用途・階数を推定し candidates(source='image') に投入
+# 費用注意：既定20棟。全件は LIMIT=--all、モデルは CLAUDE_MODEL（.env）
+CLAUDE_LIMIT ?= 20
+claude-infer:
+	uv run python -m estimate.claude_infer --limit $(CLAUDE_LIMIT)
+
+# Claude 推定の既知棟検証（先にこれ）。用途 vs 近傍(c) は高さ20m以上で測る
+# 2モデル比較は make claude-eval MODELS=claude-opus-5-5,claude-haiku-5-5
+CLAUDE_EVAL_N ?= 30
+claude-eval:
+	uv run python -m eval.claude_eval --n $(CLAUDE_EVAL_N) --min-height 20 \
+		$(if $(MODELS),--models $(MODELS),)
 
 # 更新候補リスト（CSV / GeoJSON / README）を出力する（確定済みのみ）
 # 他自治体は CITY_CODE を変える：make export CITY_CODE=13104
