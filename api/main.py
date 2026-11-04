@@ -23,6 +23,7 @@ from export.update_candidates import csv_bytes, fetch_rows, geojson_obj
 from .build_geojson import build_if_missing
 from .codelists import load_usage_codes, usage_label_map
 from .db import DERIVED_DIR, VERSION, db_lock, get_con
+from .onsite import aggregate_unresolved, load_guidance
 from .priority import TARGETS_SQL, demo_counts
 from .schema import ensure_tables
 
@@ -86,6 +87,21 @@ def demo() -> dict:
     """デモ範囲の棟数（高さ20m以上・西新宿周辺）。"""
     with db_lock:
         return demo_counts(get_con(), VERSION)
+
+
+@app.get("/api/unresolved")
+def unresolved() -> dict:
+    """判断不能（現地確認が必要）の棟を属性×理由で集約し、Claude 要約を添える。
+
+    要約は事前生成（make onsite）の JSON を読むだけ。未生成なら guidance=None。
+    """
+    with db_lock:
+        agg = aggregate_unresolved(get_con(), VERSION)
+    guidance = load_guidance()
+    for g in agg["groups"]:
+        gd = guidance.get(g["key"])
+        g["guidance"] = gd["summary"] if gd else None
+    return agg
 
 
 @app.get("/api/usage_codes")

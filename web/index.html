@@ -28,7 +28,22 @@
       <div class="m split"><span class="mv" id="m-keep">–</span><span class="ml">そのまま確定</span></div>
       <div class="m split"><span class="mv" id="m-edit">–</span><span class="ml">修正して確定</span></div>
     </div>
+    <!-- 現地確認が必要な棟（判断不能の集約）を開くバー -->
+    <div id="onsite-bar" role="button" title="判断不能（現地確認が必要）な棟を見る">
+      <span id="onsite-summary">現地確認が必要な棟を集計中…</span>
+      <span id="onsite-caret">▸</span>
+    </div>
   </header>
+
+  <!-- 現地確認が必要な棟：区分ごとの集約と「現地で何を見るか」の要約 -->
+  <section id="onsite-panel" class="hidden">
+    <div class="op-head">
+      <h2>現地確認が必要な棟<small id="op-sub"></small></h2>
+      <button id="onsite-close" title="閉じる">×</button>
+    </div>
+    <div id="onsite-groups"></div>
+    <button id="onsite-clear" class="hidden">地図の絞り込みを解除</button>
+  </section>
 
   <!-- 左：優先度順リスト -->
   <aside id="sidebar">

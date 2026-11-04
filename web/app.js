@@ -38,6 +38,10 @@ let usageCodes = [];
 let targetList = [];        // 優先度順
 let current = null;         // 選択中の building_id
 const done = new Set();     // このセッションで確定した building_id
+let onsiteData = null;      // 判断不能の集約（/api/unresolved）
+let onsiteActiveKey = null; // 地図で絞り込み中の区分キー
+const COLOR_ONSITE = "#8e24aa";   // 現地確認が必要な棟のハイライト（紫）
+const ATTR_LABEL = { usage: "用途", storeys: "階数（地上）", year_built: "建築年" };
 
 // --- 件数カウンタ -----------------------------------------------------------
 const elTotal = document.getElementById("count-total");
@@ -83,6 +87,76 @@ async function loadExportSummary() {
   el.classList.toggle("empty", s.rows === 0);
 }
 
+// --- 現地確認が必要な棟（判断不能の集約） ----------------------------------
+const onsiteBar = document.getElementById("onsite-bar");
+const onsitePanel = document.getElementById("onsite-panel");
+const onsiteCaret = document.getElementById("onsite-caret");
+
+async function loadUnresolved() {
+  onsiteData = await (await fetch("/api/unresolved")).json();
+  document.getElementById("onsite-summary").innerHTML =
+    `${onsiteData.total_targets.toLocaleString()}棟のうち、現地確認が必要な ` +
+    `<b>${onsiteData.unresolved_buildings.toLocaleString()}</b>棟`;
+  renderOnsiteGroups();
+}
+
+function renderOnsiteGroups() {
+  if (!onsiteData) return;
+  document.getElementById("op-sub").textContent = `（${onsiteData.groups.length} 区分）`;
+  const box = document.getElementById("onsite-groups");
+  box.innerHTML = "";
+  for (const g of onsiteData.groups) {
+    const el = document.createElement("div");
+    el.className = "og" + (g.key === onsiteActiveKey ? " active" : "");
+    const chips = (obj) =>
+      Object.entries(obj).filter(([, n]) => n > 0)
+        .map(([k, n]) => `<span class="chip">${k}: ${n}</span>`).join("");
+    const guide = g.guidance
+      ? `<div class="og-guide"><span class="lead">現地で確認すること</span>${g.guidance}</div>`
+      : `<div class="og-guide none">要約は未生成（make onsite で生成）</div>`;
+    el.innerHTML =
+      `<div class="og-top"><span class="og-title">${ATTR_LABEL[g.attribute] || g.attribute}</span>` +
+      `<span class="og-count">${g.count.toLocaleString()}棟</span></div>` +
+      `<div class="og-reason">理由：${g.reason}</div>` +
+      `<div class="og-chips">${chips(g.bands)}${chips(g.areas)}</div>` + guide;
+    el.addEventListener("click", () => focusGroup(g));
+    box.appendChild(el);
+  }
+}
+
+function focusGroup(g) {
+  onsiteActiveKey = g.key;
+  renderOnsiteGroups();
+  // その区分の棟だけを紫で残し、他は消す（絞り込み）
+  map.setFilter("b-onsite", ["in", ["get", "id"], ["literal", g.building_ids]]);
+  map.setPaintProperty("b-non", "fill-extrusion-opacity", 0);
+  map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0);
+  document.getElementById("onsite-clear").classList.remove("hidden");
+  if (g.bbox) {
+    map.fitBounds([[g.bbox[0], g.bbox[1]], [g.bbox[2], g.bbox[3]]],
+      { padding: 90, pitch: 30, duration: 1200, maxZoom: 16 });
+  }
+}
+
+function clearOnsiteFocus() {
+  onsiteActiveKey = null;
+  map.setFilter("b-onsite", ["in", ["get", "id"], ["literal", []]]);
+  map.setPaintProperty("b-non", "fill-extrusion-opacity", targetsOnly ? 0 : 0.85);
+  map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0.9);
+  document.getElementById("onsite-clear").classList.add("hidden");
+  renderOnsiteGroups();
+}
+
+onsiteBar.addEventListener("click", () => {
+  const hidden = onsitePanel.classList.toggle("hidden");
+  onsiteCaret.textContent = hidden ? "▸" : "▾";
+});
+document.getElementById("onsite-close").addEventListener("click", () => {
+  onsitePanel.classList.add("hidden");
+  onsiteCaret.textContent = "▸";
+});
+document.getElementById("onsite-clear").addEventListener("click", clearOnsiteFocus);
+
 // --- 建物レイヤ -------------------------------------------------------------
 function addBuildingLayers() {
   map.addSource("buildings", { type: "geojson", data: "/data/buildings.geojson" });
@@ -103,6 +177,15 @@ function addBuildingLayers() {
       "fill-extrusion-color": COLOR_TGT, "fill-extrusion-opacity": 0.9,
     },
   });
+  // 現地確認が必要な棟（判断不能の区分）のハイライト。既定は非表示（空フィルタ）。
+  map.addLayer({
+    id: "b-onsite", type: "fill-extrusion", source: "buildings",
+    filter: ["in", ["get", "id"], ["literal", []]],
+    paint: {
+      "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
+      "fill-extrusion-color": COLOR_ONSITE, "fill-extrusion-opacity": 0.95,
+    },
+  });
   map.addLayer({
     id: "b-sel", type: "fill-extrusion", source: "buildings",
     filter: ["==", ["get", "id"], "__none__"],
@@ -111,7 +194,7 @@ function addBuildingLayers() {
       "fill-extrusion-color": COLOR_SEL, "fill-extrusion-opacity": 1,
     },
   });
-  for (const id of ["b-non", "b-tgt", "b-sel"]) {
+  for (const id of ["b-non", "b-tgt", "b-onsite", "b-sel"]) {
     map.on("click", id, (e) => selectBuilding(e.features[0].properties.id));
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
@@ -121,6 +204,7 @@ function addBuildingLayers() {
 // --- 全棟 ⇄ 調査対象のみ ----------------------------------------------------
 const toggleBtn = document.getElementById("toggle");
 toggleBtn.addEventListener("click", () => {
+  if (onsiteActiveKey) clearOnsiteFocus();   // 現地確認の絞り込み中なら解除してから
   targetsOnly = !targetsOnly;
   map.setPaintProperty("b-non", "fill-extrusion-opacity", targetsOnly ? 0 : 0.85);
   const from = targetsOnly ? stats.total : stats.target;
@@ -306,4 +390,5 @@ loadUsageCodes();
 loadMetrics();
 loadExportSummary();
 loadTargets();
+loadUnresolved();
 map.on("load", addBuildingLayers);

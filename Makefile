@@ -1,5 +1,5 @@
 .PHONY: ingest ingest-2023 schema estimate version-diff geojson serve eval export test \
-        reset-confirmations pipeline claude-infer claude-eval
+        reset-confirmations pipeline claude-infer claude-eval onsite
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
 VERSION ?= 2025
@@ -48,6 +48,12 @@ CLAUDE_EVAL_N ?= 30
 claude-eval:
 	uv run python -m eval.claude_eval --n $(CLAUDE_EVAL_N) --min-height 20 \
 		$(if $(MODELS),--models $(MODELS),)
+
+# 判断不能（現地確認が必要）の棟を集約し、区分ごとに Claude 要約を生成する
+# data/derived/onsite_guidance.json に保存。区分ごとに1回だけ呼ぶ（棟ごとに呼ばない）
+# モデルは CLAUDE_MODEL（.env）。集約だけ見るなら uv run python -m api.onsite
+onsite:
+	uv run python -m api.onsite --generate
 
 # 更新候補リスト（CSV / GeoJSON / README）を出力する（確定済みのみ）
 # 他自治体は CITY_CODE を変える：make export CITY_CODE=13104

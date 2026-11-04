@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-11-04 判断不能の集約と「現地で何を見るか」画面：判断不能は unresolvable フラグで数える
+
+- 背景 / きっかけ：用途は候補提示どまり、20m超の階数は候補扱い（上の2エントリ）。「自動では埋まらない棟」を担当者に渡し、現地で何を確認すればよいかを示す画面が要る。
+- 判断：
+  1. **判断不能の定義は `unresolvable=TRUE`（value=NULL だけで数えない）。** year_built は区間推定（value_min/max を使い value=NULL）で**判断不能ではない**ため、value=NULL で数えると version_diff の 5,805 件を誤計上する。実測、現地確認が必要なのは **storeys の高さ欠損 521棟のみ**（用途は近傍で常に候補値が付き判断不能ゼロ、Claude 推定は本番 candidates に未投入）。集約は**属性×理由で汎用化**し、将来 Claude 推定を candidates に入れれば用途の判断不能区分も自動で現れる。
+  2. **集約は `api/`（eval 非依存）。** `api/onsite.py` の `aggregate_unresolved`（純SQL）。高さ帯は api 内に定義を持ち、西新宿1km圏は `priority.demo_counts` と同じ（都庁6677から ST_Distance≤1000）。区分ごとに帯別・エリア別の内訳と bbox・building_ids を返す。
+  3. **Claude 要約は区分ごとに1回だけ**（棟ごとに呼ばない＝費用と時間）。入力ハッシュでキャッシュ＋費用ログ（CLAUDE.md）。**別ステップ `make onsite` で生成し `data/derived/onsite_guidance.json` に保存、API（`GET /api/unresolved`）は読むだけ**でリクエスト経路では Claude を呼ばない。system prompt で「現地確認でも埋まらない区分は別データが必要と正直に言う／埋め方をでっち上げない」を指示。
+  4. **画面**：ヘッダに「4,982棟のうち、現地確認が必要な N棟」バー → パネルに区分（属性・棟数・理由・帯/エリアのチップ・Claude 要約）。区分クリックで**その区分の棟だけ地図に紫で絞り込み**（他を消す）＋ bbox へ寄せる。「解除」で戻す。要約未生成なら「make onsite で生成」と表示。
+- 根拠（再現）：
+  - `uv run python -m api.onsite`（集約のみ）/ `make onsite`（Claude 要約生成）/ `GET /api/unresolved`。
+  - 集約：現地確認が必要 **521棟**（高さ無 521 / 西新宿1km圏 140・その他 381、bbox 139.68–139.74・35.67–35.73、building_ids 521）。
+  - Claude 要約（claude-opus-5-5, API 1回 **$0.0074**）：「現地で外観から窓・外壁の段を数えて階数を記録、数えにくい高層は入口のフロア案内板やEVの階表示で最上階を確認、現地で難しければ区役所の建築計画概要書の階数で補う」＝**現地で埋まる区分**（正直に埋まらないと言う挙動も system prompt で担保）。
+  - 生成物（`data/derived/onsite_guidance.json`・`data/cache/onsite_guidance/`）は git 管理外。クローン直後は要約 None（UI は「未生成」表示、集約は candidates から常に算出）。
+- 影響範囲：`api/onsite.py`（新規）、`api/main.py`（`/api/unresolved`）、`Makefile`（`onsite`）、`web/`（index.html のバー＋パネル、style.css、app.js の `b-onsite` レイヤ＋絞り込み）。買い物リストではなく「現地で何を確認するか」を属性ごとに1つの文で渡せるようにした。
+
 ## 2026-11-04 階数精度を高さ帯別に測り直し：20m以上は構造的に低下（階高の付け方では直らない）→ 20m超を候補扱いに
 
 - 背景 / きっかけ：直前の Claude 検証で階数が全体 30%/60% と低く見えたため、主軸である「高さ÷階高」の仮推定をホールドアウト全体で**高さ帯別**に測り直し、20m以上で落ちるかと、その原因（階高の当て方か、実際の階高のズレか）を切り分けた。
