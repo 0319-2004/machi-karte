@@ -407,6 +407,41 @@ def render_markdown(facts: dict, prose: dict, model: str, meta: dict) -> str:
     return "\n".join(L)
 
 
+def _empty_report(facts: dict, city_code: str) -> str:
+    """確定0件のときの出力。Claude は呼ばず『確定された棟がありません』を明示する。"""
+    today = time.strftime("%Y-%m-%d")
+    L: list[str] = []
+    L.append(f"# まちカルテ 調査レポート — 新宿区（{city_code}）")
+    L.append("")
+    L.append(_table(["項目", "内容"], [
+        ["対象地区", f"新宿区（{city_code}）"],
+        ["元データの版", f"PLATEAU {facts['version']}年度版"],
+        ["確認・確定した棟数", "0 棟"],
+        ["レポート作成日", today],
+    ]))
+    L.append("")
+    L.append("## 確定された棟がありません")
+    L.append("")
+    L.append("この期間に人が確定した棟（机上 desk・現地 onsite とも）はありません。"
+             "確定が0件で数値の根拠がないため、文章要約（Claude）は生成していません"
+             "（API 呼び出しなし）。地図で確認・確定するか、現地調査モードで入力したうえで、"
+             "再度このコマンドを実行してください。")
+    L.append("")
+    L.append("## 現地確認が必要な棟（参考）")
+    L.append("")
+    L.append(f"確定作業とは別に、不明群 {facts['unknown_total']} 棟のうち自動推定で判断不能"
+             f"だったのは **{facts['onsite_needed_buildings']} 棟** です（確定0件でも集計できる実数）。")
+    L.append("")
+    L.append("## データ源と出典")
+    L.append("")
+    L.append(_table(["データ源", "表記"],
+                    [[src, note] for src, note in ATTRIBUTION_TABLE]))
+    L.append("")
+    L.append("<!-- 生成: 確定0件のため Claude 生成スキップ（API 0 回） -->")
+    L.append("")
+    return "\n".join(L)
+
+
 def _append_log(facts: dict, model: str, meta: dict) -> None:
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     with open(LOG_PATH, "a", encoding="utf-8") as fp:
@@ -440,6 +475,18 @@ def run(db_path: str | None = None, city_code: str = CITY_CODE,
         print("\n--- facts（dry-run：API は呼ばない）---")
         print(json.dumps(_facts_for_prompt(facts), ensure_ascii=False, indent=2))
         return {"dry_run": True, **facts}
+
+    # 確定0件：数字の根拠がないので Claude を呼ばず、確定がないことを明示して返す。
+    if facts["confirmed_buildings"] == 0:
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"report_{city_code}.md")
+        with open(out_path, "w", encoding="utf-8") as fp:
+            fp.write(_empty_report(facts, city_code))
+        _append_log(facts, "(skipped)", {"usage": None, "cost_usd": None, "cached": False})
+        print("  確定0件：Claude 生成をスキップ（API 0 回）。『確定された棟がありません』を出力。")
+        print(f"  Markdown    : {out_path}")
+        return {"report": out_path, "confirmed_buildings": 0, "skipped": True,
+                "api_calls": 0}
 
     model = model or get_model()
     res = generate_prose(facts, model)

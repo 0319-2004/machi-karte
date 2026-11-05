@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-11-05 通し確認：確定0件のレポートはClaudeを呼ばない／DuckDBはサーバーとCLIが排他
+
+- 背景 / きっかけ：ingest から通しで動かした直後（confirmations が空）に export と report を叩いたらどうなるかを確認し、通しの動作確認（reset→確認3棟→現地1棟→export→report）を実施した。
+- 判断：
+  - **export は確定0件でも落ちない**（ヘッダのみの CSV＝BOM 付き、GeoJSON features 0）。修正不要と確認。
+  - **report は確定0件のとき Claude を呼ばない。** これまでは0件でも1回 API を叩いていた（約$0.024）。数字の根拠が無いので `confirmed_buildings==0` で生成をスキップし、『確定された棟がありません』を明示する専用出力（`_empty_report`）を返す（API 0回）。確定に依存しない「現地確認が必要な棟」の実数だけは参考に載せる。`tests/test_report.py` で固定。
+  - **DuckDB は単一プロセス書き込み。** API サーバー（read-write 接続を常時保持）が起動している間は、`make export` / `uv run python -m export.report` / `eval` 系テストが同じ DB を開けず `IOException: Could not set lock` で落ちる。**手順：CLI の export/report はサーバーを止めてから実行し、必要なら再起動する**（起動中にダウンロードだけ欲しいときは API の `/api/export.csv` `/api/export.geojson` を使う）。`make test` もサーバーを止めてから。
+  - Makefile に `demo-reset` は無い。確定履歴のリセットは **`make reset-confirmations`**（`api.schema --reset-confirmations`）。
+- 根拠（実データで確認）：reset 後 export=0棟/0行・GeoJSON features 0、report=API 0回で『確定された棟がありません』。確認3棟（keep2/edit1）＋現地1棟（写真なし）を入れて、export は 4棟/8行（3 desk＋1 onsite）、report は 確認・確定の内訳（階数 4＝keep3/edit1、用途 4＝keep2/edit2）と「現地調査で確定した棟 1棟（写真0枚）」を出力。`/api/confirmed`＝desk3/onsite1、`/api/metrics`＝processed 3（desk 限定）。サーバー停止時 `pytest` 31 passed、起動中は eval_leak 3件が DB ロックで error（コード不具合ではない）。
+- 影響範囲：report の空ガードで無駄な課金と無意味な文章生成を止めた。運用は「サーバーと CLI の DB アクセスは排他」を前提に手順化する。CSV では onsite の値も `source=manual` として出る（現地の区別は DB の `source` 列・レポートの現地節・`/api/confirmed` で持つ）点は仕様として残す。
+
 ## 2026-11-05 現地調査モード（スマホ）：source で desk/onsite を分離、位置情報は使わない
 
 - 背景 / きっかけ：机上で絞り込んだ不明群を、担当者がスマホのブラウザで現地入力し、確定・地図・レポートに反映する。
