@@ -142,6 +142,42 @@ def compute_facts(con, city_code: str = CITY_CODE, version: str = VERSION) -> di
         for g in onsite["groups"]
     ]
 
+    # 現地調査（source='onsite'）で確定した棟（机上 desk と分けて数える）
+    field_rows = con.execute(
+        """
+        SELECT c.attribute, count(*), count(DISTINCT c.building_id)
+        FROM confirmations c
+        JOIN buildings b ON b.building_id=c.building_id AND b.version=c.version
+        WHERE c.version=? AND b.city_code=? AND c.source='onsite'
+        GROUP BY c.attribute
+        """,
+        [version, city_code],
+    ).fetchall()
+    field_buildings = con.execute(
+        """
+        SELECT count(DISTINCT c.building_id)
+        FROM confirmations c
+        JOIN buildings b ON b.building_id=c.building_id AND b.version=c.version
+        WHERE c.version=? AND b.city_code=? AND c.source='onsite'
+        """,
+        [version, city_code],
+    ).fetchone()[0]
+    field_photos = con.execute(
+        """
+        SELECT count(*)
+        FROM evidence e
+        JOIN buildings b ON b.building_id=e.building_id AND b.version=e.version
+        WHERE e.version=? AND b.city_code=? AND e.kind='photo'
+        """,
+        [version, city_code],
+    ).fetchone()[0]
+    field_survey = {
+        "buildings": field_buildings,
+        "rows": sum(r[1] for r in field_rows),
+        "photos": field_photos,
+        "by_attribute": {ONSITE_ATTR_LABEL.get(a, a): n for a, n, _ in field_rows},
+    }
+
     return {
         "city_code": city_code,
         "version": version,
@@ -156,6 +192,7 @@ def compute_facts(con, city_code: str = CITY_CODE, version: str = VERSION) -> di
         "unknown_total": onsite["total_targets"],
         "onsite_needed_buildings": onsite["unresolved_buildings"],
         "onsite_groups": onsite_groups,
+        "field_survey": field_survey,
     }
 
 
@@ -306,6 +343,22 @@ def render_markdown(facts: dict, prose: dict, model: str, meta: dict) -> str:
     commentary = prose.get("confirmed_commentary", "").strip()
     if commentary:
         L.append(commentary)
+        L.append("")
+
+    fs = f.get("field_survey") or {}
+    L.append("## 現地調査で確定した棟")
+    L.append("")
+    if fs.get("buildings"):
+        L.append(f"スマホの現地調査（source=onsite）で確定したのは **{fs['buildings']} 棟**"
+                 f"（属性 {fs['rows']} 件、写真 {fs['photos']} 枚）です。"
+                 "机上での確定とは分けて記録しています。")
+        L.append("")
+        if fs.get("by_attribute"):
+            L.append(_table(["属性", "現地で確定した件数"],
+                            [[k, v] for k, v in fs["by_attribute"].items()]))
+            L.append("")
+    else:
+        L.append("現地調査で確定した棟はまだありません。")
         L.append("")
 
     L.append("## 現地確認が必要な棟")

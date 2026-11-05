@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-11-05 現地調査モード（スマホ）：source で desk/onsite を分離、位置情報は使わない
+
+- 背景 / きっかけ：机上で絞り込んだ不明群を、担当者がスマホのブラウザで現地入力し、確定・地図・レポートに反映する。
+- 判断：
+  - **`confirmations` に `source` 列を足し、机上='desk' / 現地='onsite' を区別する。** 公式データは上書きせず、現地の確定も既存同様 `confirmations` に残す。既存 DB には `ALTER TABLE ... ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'desk'`（`api/schema.py` の `_MIGRATIONS`）で冪等に追加。既存行は 'desk'。
+  - **受け口 `POST /api/survey`（`api/main.py`）**：usage/storeys/写真/メモを1棟ぶん受ける。写真は data URL を base64 デコードして `data/survey/`（git 管理外）に保存し `evidence(kind='photo')` に紐づける（Claude 多モーダルの `kind='image'` と分ける＝再推定で消えない）。usage/storeys は与えられた分だけ `source='onsite'` で確定。`accepted_candidate` は推定値一致で TRUE。**写真なしでも受理**、入力皆無なら 400。
+  - **計測 `/api/metrics` は `source='desk'` に限定。** 現地は opened_at≒confirmed_at で0秒寄りになり「1棟あたり処理時間」の中央値を歪めるため。デモの数字の意味（机上トリアージ速度）を保つ。
+  - **地図反映**：`GET /api/confirmed`→`{onsite,desk}`、`web/app.js` に緑レイヤ `b-done-onsite` を追加して現地確定棟を塗る。
+  - **フロント（新規 `web/survey.html` + `web/survey.js`）**：スマホ縦1画面（max-width 480px, 100dvh）。棟選択⇄1棟調査。位置の代わりに地理院タイルのミニ地図（**Geolocation は使わない**＝許可ダイアログで現地が止まるのを避ける）。入力は都度 localStorage に下書き保存（通信断でも消えない）。写真は canvas で長辺1280pxに縮小して data URL 化（localStorage と送信を軽く）。
+  - **レポート（`export/report.py`）**：`field_survey`（現地の棟数・件数・写真数・属性内訳）を SQL 集計で足し、「現地調査で確定した棟」節を描く（数字は Python、文章は Claude の分担は維持）。
+- 根拠（実データで確認）：`pytest tests/` 29 passed。起動して `POST /api/survey` で usage+storeys 確定・写真保存・静的配信200を確認。`/api/confirmed` が onsite/desk を分離。`/api/metrics` は現地を除いて processed=9 のまま。写真なし送信=成功・入力皆無=400。レポートに現地節が出力。検証で入れた合成 onsite データと写真は掃除済み（desk 9棟は保持）。
+- 影響範囲：確定の経路が机上と現地の2系統になった。`source` の分離で、計測・地図・レポートがそれぞれ正しく desk/onsite を扱う。375px の画面崩れは実機/エミュで各自確認する方針（Playwright は導入しない）。
+
 ## 2026-11-05 調査レポート生成（export/report.py）：数字は SQL、文章だけ Claude、API は1回
 
 - 背景 / きっかけ：確定した棟を、自治体の担当者が上司に出せる報告書（Markdown）にする。CSV / GeoJSON と同じ `data/derived/export/` に `report_<city>.md` を置く。

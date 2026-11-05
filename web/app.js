@@ -41,6 +41,7 @@ const done = new Set();     // このセッションで確定した building_id
 let onsiteData = null;      // 判断不能の集約（/api/unresolved）
 let onsiteActiveKey = null; // 地図で絞り込み中の区分キー
 const COLOR_ONSITE = "#8e24aa";   // 現地確認が必要な棟のハイライト（紫）
+const COLOR_DONE_ONSITE = "#2e7d32"; // 現地調査で確定した棟（緑）
 const ATTR_LABEL = { usage: "用途", storeys: "階数（地上）", year_built: "建築年" };
 
 // --- 件数カウンタ -----------------------------------------------------------
@@ -186,6 +187,15 @@ function addBuildingLayers() {
       "fill-extrusion-color": COLOR_ONSITE, "fill-extrusion-opacity": 0.95,
     },
   });
+  // 現地調査（スマホ）で確定した棟を緑で示す。既定は非表示（空フィルタ）。
+  map.addLayer({
+    id: "b-done-onsite", type: "fill-extrusion", source: "buildings",
+    filter: ["in", ["get", "id"], ["literal", []]],
+    paint: {
+      "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
+      "fill-extrusion-color": COLOR_DONE_ONSITE, "fill-extrusion-opacity": 0.95,
+    },
+  });
   map.addLayer({
     id: "b-sel", type: "fill-extrusion", source: "buildings",
     filter: ["==", ["get", "id"], "__none__"],
@@ -194,11 +204,22 @@ function addBuildingLayers() {
       "fill-extrusion-color": COLOR_SEL, "fill-extrusion-opacity": 1,
     },
   });
-  for (const id of ["b-non", "b-tgt", "b-onsite", "b-sel"]) {
+  for (const id of ["b-non", "b-tgt", "b-onsite", "b-done-onsite", "b-sel"]) {
     map.on("click", id, (e) => selectBuilding(e.features[0].properties.id));
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
   }
+  loadConfirmed();
+}
+
+// 現地調査で確定した棟（source='onsite'）を緑でハイライトする
+async function loadConfirmed() {
+  try {
+    const c = await (await fetch("/api/confirmed")).json();
+    if (map.getLayer("b-done-onsite")) {
+      map.setFilter("b-done-onsite", ["in", ["get", "id"], ["literal", c.onsite || []]]);
+    }
+  } catch {}
 }
 
 // --- 全棟 ⇄ 調査対象のみ ----------------------------------------------------

@@ -47,6 +47,7 @@ _DDL = [
     """,
     # 人の確定。1棟×属性で1行。opened_at/confirmed_at は1棟の操作セッション共通。
     # accepted_candidate=TRUE が「そのまま確定」、FALSE が「修正して確定」。
+    # source：机上（既存の確認画面）='desk' / 現地調査（スマホ）='onsite'。区別できるように持つ。
     """
     CREATE TABLE IF NOT EXISTS confirmations (
         building_id       VARCHAR,
@@ -54,6 +55,7 @@ _DDL = [
         attribute         VARCHAR,
         confirmed_value   VARCHAR,
         accepted_candidate BOOLEAN,  -- そのまま=TRUE / 修正=FALSE
+        source            VARCHAR DEFAULT 'desk',  -- desk（机上）/ onsite（現地）
         opened_at         TIMESTAMP, -- 計測用（サーバー側で記録）
         confirmed_at      TIMESTAMP, -- 計測用（サーバー側で記録）
         confirmed_by      VARCHAR,
@@ -86,10 +88,18 @@ _DDL = [
 ]
 
 
+# 既存 DB への追記（冪等）。古い confirmations には source 列が無いので足す。
+_MIGRATIONS = [
+    "ALTER TABLE confirmations ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'desk'",
+]
+
+
 def ensure_tables(con: duckdb.DuckDBPyConnection) -> None:
     """candidates / confirmations / evidence / open_events を作る（冪等）。"""
     for ddl in _DDL:
         con.execute(ddl)
+    for mig in _MIGRATIONS:
+        con.execute(mig)
 
 
 def reset_confirmations(con: duckdb.DuckDBPyConnection) -> None:

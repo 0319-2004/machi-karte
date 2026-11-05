@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>まちカルテ 現地調査</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <style>
+    :root { --bg:#fff; --ink:#263238; --sub:#607d8b; --line:#e0e0e0;
+            --accent:#e64a19; --ok:#2e7d32; --warn:#8e24aa; --pad:10px; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin:0; height:100%; }
+    body { font-family: system-ui, "Hiragino Sans", sans-serif; color:var(--ink);
+           background:#eceff1; overscroll-behavior:none; }
+    button { font:inherit; }
+    .hidden { display:none !important; }
+
+    /* 画面はビューポートに収める（スマホ縦） */
+    #view-pick, #view-survey { display:flex; flex-direction:column;
+      height:100dvh; max-width:480px; margin:0 auto; background:var(--bg); }
+
+    /* ヘッダ */
+    .bar { display:flex; align-items:center; gap:8px; padding:10px var(--pad);
+           border-bottom:1px solid var(--line); background:var(--bg); }
+    .bar h1 { font-size:16px; margin:0; flex:1; }
+    .bar .back { border:none; background:none; font-size:20px; color:var(--sub);
+                 padding:4px 6px; cursor:pointer; }
+    .bar .prog { font-size:13px; color:var(--sub); font-variant-numeric:tabular-nums; }
+
+    /* 棟を選ぶ画面 */
+    .op-row { display:flex; gap:8px; padding:8px var(--pad); border-bottom:1px solid var(--line); }
+    .op-row input { flex:1; padding:8px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+    #pick-list { flex:1; overflow-y:auto; margin:0; padding:0; list-style:none; }
+    #pick-list li { display:flex; align-items:center; gap:10px; padding:11px var(--pad);
+      border-bottom:1px solid #f0f0f0; }
+    #pick-list li.on { background:#fff3e0; }
+    #pick-list input[type=checkbox] { width:22px; height:22px; flex:none; accent-color:var(--accent); }
+    #pick-list .bid { font-weight:600; font-size:14px; }
+    #pick-list .meta { font-size:12px; color:var(--sub); }
+    #pick-list .tag { font-size:10px; padding:1px 6px; border-radius:10px; margin-left:6px;
+      background:#ffccbc; color:#bf360c; }
+    #pick-list .check { margin-left:auto; color:var(--ok); font-weight:700; }
+    .foot { padding:10px var(--pad); border-top:1px solid var(--line); background:var(--bg); }
+    .foot button { width:100%; padding:14px; border:none; border-radius:10px;
+      background:var(--accent); color:#fff; font-size:16px; font-weight:600; }
+    .foot button:disabled { background:#cfd8dc; }
+
+    /* 調査画面：地図＋入力を1画面に収める */
+    #mini-map { height:30vh; min-height:150px; flex:none; background:#dde; }
+    .survey-body { flex:1; display:flex; flex-direction:column; padding:8px var(--pad);
+      gap:7px; overflow-y:auto; }
+    .est { font-size:13px; color:var(--sub); }
+    .est b { color:var(--ink); }
+    .guide { font-size:12.5px; background:#f3e5f5; color:#4a148c; border-radius:8px;
+      padding:7px 9px; line-height:1.4; }
+    .guide .lead { font-weight:700; margin-right:6px; }
+    .field { display:flex; flex-direction:column; gap:3px; }
+    .field label { font-size:12px; color:var(--sub); }
+    .field select, .field input[type=number], .field textarea {
+      width:100%; padding:9px; border:1px solid var(--line); border-radius:8px; font-size:15px; }
+    .field textarea { resize:none; height:42px; }
+    .two { display:flex; gap:8px; }
+    .two .field { flex:1; }
+    .photo-row { display:flex; align-items:center; gap:10px; }
+    .photo-btn { flex:none; padding:10px 12px; border:1px solid var(--accent); color:var(--accent);
+      background:#fff; border-radius:8px; font-size:14px; }
+    .photo-row input[type=file] { display:none; }
+    #photo-thumb { height:46px; border-radius:6px; display:none; }
+    .photo-del { border:none; background:none; color:var(--sub); font-size:13px; text-decoration:underline; }
+    .saved-flag { font-size:12px; color:var(--ok); }
+    .err { font-size:12px; color:#c62828; }
+
+    .nav { display:flex; gap:8px; padding:8px var(--pad); border-top:1px solid var(--line);
+      background:var(--bg); }
+    .nav .side { flex:none; width:52px; border:1px solid var(--line); background:#fff;
+      border-radius:10px; font-size:18px; color:var(--sub); }
+    .nav .save { flex:1; border:none; border-radius:10px; background:var(--ok); color:#fff;
+      font-size:16px; font-weight:600; }
+    .nav .save.done { background:#81c784; }
+    .attrib { font-size:10px; color:var(--sub); text-align:center; padding:2px; }
+    .attrib a { color:var(--sub); }
+  </style>
+</head>
+<body>
+  <!-- 棟を選ぶ -->
+  <div id="view-pick">
+    <div class="bar"><h1>現地調査｜今日回る棟を選ぶ</h1></div>
+    <div class="op-row">
+      <input id="operator" type="text" placeholder="調査担当者（任意）" autocomplete="name" />
+    </div>
+    <ul id="pick-list"></ul>
+    <div class="foot">
+      <button id="start-btn" disabled>選んだ棟を調査（0）</button>
+    </div>
+  </div>
+
+  <!-- 1棟ずつ調査 -->
+  <div id="view-survey" class="hidden">
+    <div class="bar">
+      <button class="back" id="survey-back" title="棟の選択に戻る">←</button>
+      <h1 id="survey-bid">—</h1>
+      <span class="prog" id="survey-prog"></span>
+    </div>
+    <div id="mini-map"></div>
+    <div class="survey-body">
+      <div class="est" id="survey-est">推定を読み込み中…</div>
+      <div class="guide hidden" id="survey-guide"></div>
+      <div class="field">
+        <label>用途（現地で確認）</label>
+        <select id="f-usage"></select>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label>階数（地上）</label>
+          <input id="f-storeys" type="number" inputmode="numeric" min="1" max="200" placeholder="—" />
+        </div>
+        <div class="field" style="flex:1.4">
+          <label>写真（任意）</label>
+          <div class="photo-row">
+            <label class="photo-btn" for="f-photo">📷 撮影</label>
+            <input id="f-photo" type="file" accept="image/*" capture="environment" />
+            <img id="photo-thumb" alt="撮影した写真" />
+            <button type="button" class="photo-del hidden" id="photo-del">削除</button>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>メモ（任意）</label>
+        <textarea id="f-note" placeholder="気づいたこと"></textarea>
+      </div>
+      <div><span class="saved-flag hidden" id="saved-flag">✓ 入力を端末に保存済み</span>
+           <span class="err hidden" id="survey-err"></span></div>
+    </div>
+    <div class="nav">
+      <button class="side" id="nav-prev" title="前の棟">‹</button>
+      <button class="save" id="nav-save">保存して次へ</button>
+      <button class="side" id="nav-next" title="次の棟">›</button>
+    </div>
+    <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
+      target="_blank" rel="noopener">国土地理院（地理院タイル）</a></div>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="/survey.js"></script>
+</body>
+</html>

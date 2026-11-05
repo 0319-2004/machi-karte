@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import json
 import os
@@ -29,6 +31,8 @@ from .schema import ensure_tables
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
+DATA_DIR = os.environ.get("DATA_DIR", "./data")
+SURVEY_DIR = os.path.join(DATA_DIR, "survey")   # 現地写真の保存先（git 管理外）
 
 USAGE_LABELS = usage_label_map()
 
@@ -297,8 +301,9 @@ def confirm(building_id: str, body: ConfirmBody) -> dict:
                 f"""
                 INSERT OR REPLACE INTO confirmations
                   (building_id, version, attribute, confirmed_value,
-                   accepted_candidate, opened_at, confirmed_at, confirmed_by, operator_note)
-                VALUES (?, ?, ?, ?, ?, {opened_sql}, now(), ?, ?)
+                   accepted_candidate, source, opened_at, confirmed_at,
+                   confirmed_by, operator_note)
+                VALUES (?, ?, ?, ?, ?, 'desk', {opened_sql}, now(), ?, ?)
                 """,
                 [building_id, VERSION, attr, val, accepted,
                  VERSION, building_id, body.operator, body.note],
@@ -307,18 +312,136 @@ def confirm(building_id: str, body: ConfirmBody) -> dict:
             "accepted": body.accepted}
 
 
+# --- 現地調査（スマホ）：入力と写真を受け取り source='onsite' で確定 --------
+
+class SurveyBody(BaseModel):
+    building_id: str                  # 対象の建物ID
+    usage: str | None = None          # 現地で選んだ用途コード
+    storeys: int | None = None        # 現地で数えた地上階数
+    note: str | None = None           # 自由記述メモ
+    operator: str | None = None       # 調査担当者
+    photo: str | None = None          # data URL（base64, 端末側で縮小済み）。無くてよい
+
+
+def _save_survey_photo(con, building_id: str, photo: str) -> dict | None:
+    """data URL の写真を data/survey/ に保存し、evidence(kind='photo') に紐づける。"""
+    m = re.match(r"^data:(image/(?:jpeg|png|webp));base64,(.+)$", photo, re.DOTALL)
+    if not m:
+        return None
+    media_type, b64 = m.group(1), m.group(2)
+    ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[media_type]
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+
+    os.makedirs(SURVEY_DIR, exist_ok=True)
+    safe = re.sub(r"[^0-9A-Za-z_-]", "_", building_id)
+    seq = len([f for f in os.listdir(SURVEY_DIR) if f.startswith(safe + "_")]) + 1
+    fname = f"{safe}_{seq}.{ext}"
+    with open(os.path.join(SURVEY_DIR, fname), "wb") as f:
+        f.write(raw)
+
+    eid = f"{building_id}-onsite-photo{seq}"
+    url = f"/survey/{fname}"
+    con.execute(
+        "INSERT OR REPLACE INTO evidence "
+        "(evidence_id, building_id, version, kind, label, detail) "
+        "VALUES (?, ?, ?, 'photo', ?, ?)",
+        [eid, building_id, VERSION, "現地写真", json.dumps(
+            {"source": "onsite", "filename": fname, "url": url}, ensure_ascii=False)],
+    )
+    return {"evidence_id": eid, "url": url}
+
+
+@app.post("/api/survey")
+def survey(body: SurveyBody) -> dict:
+    """現地調査の入力（用途・階数・写真・メモ）を受け取り、source='onsite' で確定する。
+
+    - 写真は data/survey/（git 管理外）に保存し evidence に紐づける。無くても受け付ける。
+    - usage / storeys は与えられた分だけ confirmations に書く。accepted_candidate は
+      推定値と一致すれば TRUE（そのまま）、違えば FALSE（現地で修正）。
+    - opened_at はサーバー保持分があれば使う（無ければ now()）。計測は desk と分ける。
+    """
+    building_id = body.building_id
+    with db_lock:
+        con = get_con()
+        if not con.execute(
+            "SELECT 1 FROM buildings WHERE version=? AND building_id=?",
+            [VERSION, building_id],
+        ).fetchone():
+            raise HTTPException(status_code=404, detail="建物が見つかりません")
+
+        cands = _candidates_for(con, building_id)
+        photo_info = None
+        if body.photo:
+            photo_info = _save_survey_photo(con, building_id, body.photo)
+
+        opened_sql = ("COALESCE((SELECT opened_at FROM open_events "
+                      "WHERE version=? AND building_id=?), now())")
+
+        written = []
+        pairs = [("usage", None if body.usage in (None, "") else str(body.usage)),
+                 ("storeys", None if body.storeys is None else str(body.storeys))]
+        for attr, val in pairs:
+            if val is None:
+                continue
+            cand = cands.get(attr)
+            est = str(cand["value"]) if (cand and cand["value"] is not None) else None
+            accepted = (est is not None and val == est)
+            con.execute(
+                f"""
+                INSERT OR REPLACE INTO confirmations
+                  (building_id, version, attribute, confirmed_value,
+                   accepted_candidate, source, opened_at, confirmed_at,
+                   confirmed_by, operator_note)
+                VALUES (?, ?, ?, ?, ?, 'onsite', {opened_sql}, now(), ?, ?)
+                """,
+                [building_id, VERSION, attr, val, accepted,
+                 VERSION, building_id, body.operator, body.note],
+            )
+            written.append(attr)
+
+    if not written and not photo_info:
+        raise HTTPException(status_code=400,
+                            detail="用途・階数・写真のいずれも入力がありません")
+    return {"building_id": building_id, "confirmed": written,
+            "photo": photo_info, "source": "onsite"}
+
+
+@app.get("/api/confirmed")
+def confirmed() -> dict:
+    """確定済みの建物IDを source 別（desk / onsite）で返す。地図の色分けに使う。"""
+    with db_lock:
+        rows = get_con().execute(
+            """
+            SELECT building_id, bool_or(source='onsite') AS any_onsite
+            FROM confirmations WHERE version=?
+            GROUP BY building_id
+            """,
+            [VERSION],
+        ).fetchall()
+    onsite = [r[0] for r in rows if r[1]]
+    desk = [r[0] for r in rows if not r[1]]
+    return {"onsite": onsite, "desk": desk}
+
+
 # --- 計測の集計（処理済みN棟 / 合計M分 / 中央値S秒） ------------------------
 
 @app.get("/api/metrics")
 def metrics() -> dict:
-    """確定済みを1棟ごとに集計。平均でなく中央値。そのまま／修正を分ける。"""
+    """確定済みを1棟ごとに集計。平均でなく中央値。そのまま／修正を分ける。
+
+    処理時間の指標は机上（desk）のトリアージが対象。現地調査（onsite）は
+    opened_at≒confirmed_at で0秒寄りになり中央値を歪めるため、ここでは除く。
+    """
     with db_lock:
         rows = get_con().execute(
             """
             SELECT building_id,
                    (epoch_ms(max(confirmed_at)) - epoch_ms(min(opened_at))) / 1000.0 AS sec,
                    bool_and(accepted_candidate) AS all_accepted
-            FROM confirmations WHERE version=?
+            FROM confirmations WHERE version=? AND source='desk'
             GROUP BY building_id
             """,
             [VERSION],
@@ -451,6 +574,10 @@ def attribution() -> str:
 # /data/buildings.geojson を配信（ファイルが無ければ startup で生成済み）
 if os.path.isdir(DERIVED_DIR):
     app.mount("/data", StaticFiles(directory=DERIVED_DIR), name="data")
+
+# 現地写真を /survey で配信（保存先が無ければ作ってからマウント）
+os.makedirs(SURVEY_DIR, exist_ok=True)
+app.mount("/survey", StaticFiles(directory=SURVEY_DIR), name="survey")
 
 # web/ を / にマウント（index.html を返す）。最後に置く（API ルートを優先）。
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
