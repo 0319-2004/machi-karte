@@ -12,7 +12,8 @@ MapLibre GL JS による地図と確認画面を置く場所。まずはビル�
   プラン→1棟ずつ入力。入力画面には**音声入力（試験的）**がある。
 
 `api`（FastAPI）が `/` で配信するので、`make serve` 後に http://localhost:8000/ を開く。
-現地調査モードは http://localhost:8000/survey/ 。
+現地調査モードは http://localhost:8000/survey.html 。
+（`/survey/` は現地写真の保存先 `data/survey/` のマウントなので、UI は `survey.html` を開く）
 
 ## 音声入力（試験的）について
 
@@ -27,7 +28,7 @@ MapLibre GL JS による地図と確認画面を置く場所。まずはビル�
 
 ### 実機で試す手順
 
-- **PC（localhost）**：HTTP でOK。http://localhost:8000/survey/ で音声まで動く。
+- **PC（localhost）**：HTTP でOK。http://localhost:8000/survey.html で音声まで動く。
 - **スマホ実機**：マイクは secure context 必須のため、**同一Wi-Fi＋HTTP（IP直叩き）では音声は動かない**
   （地図・手入力は動く）。音声を試すには **HTTPS トンネル**が要る：
   ```
@@ -35,4 +36,4 @@ MapLibre GL JS による地図と確認画面を置く場所。まずはビル�
   # または
   ngrok http 8000
   ```
-  得られた `https://…/survey/` をスマホのブラウザで開き、「音声で入力」→マイク許可で確認する。
+  得られた `https://…/survey.html` をスマホのブラウザで開き、「音声で入力」→マイク許可で確認する。
