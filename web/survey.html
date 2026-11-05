@@ -150,6 +150,15 @@
     @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(230,74,25,.5);} 50%{box-shadow:0 0 0 6px rgba(230,74,25,0);} }
     .voice-status { font-size:12px; color:var(--sub); }
     .voice-status.err { color:#c62828; }
+    /* 聞き返しの質問（大きく1つ）と、埋まり具合 */
+    .voice-q { margin:6px 0; padding:12px 13px; border-radius:10px; background:#fff3e0;
+      border:1px solid #ffcc80; color:#5d4037; font-size:16px; font-weight:700; line-height:1.45; }
+    .voice-q .q-hint { display:block; margin-top:5px; font-size:12px; font-weight:400; color:var(--sub); }
+    .voice-fill { margin:2px 0 4px; font-size:12px; color:var(--sub); }
+    .voice-fill .chip { margin-right:10px; }
+    .voice-fill .ok { color:var(--ok); font-weight:700; }
+    .voice-fill .gu { color:var(--warn); font-weight:700; }
+    .voice-fill .empty { color:#c62828; }
 
     /* 同意モーダル */
     .modal { position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.45);
@@ -265,6 +274,8 @@
           <button type="button" id="voice-btn">🎤 音声で入力</button>
           <span class="voice-status" id="voice-status"></span>
         </div>
+        <div class="voice-q hidden" id="voice-question"></div>
+        <div class="voice-fill hidden" id="voice-fill"></div>
         <textarea id="f-note" placeholder="気づいたこと"></textarea>
       </div>
       <div><span class="saved-flag hidden" id="saved-flag">✓ 入力を端末に保存済み</span>

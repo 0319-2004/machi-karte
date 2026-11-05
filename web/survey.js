@@ -519,6 +519,8 @@ function fillUsageOptions(code) {
 async function loadBuilding(i) {
   stopVoice(true);                 // 棟を移動したら音声は止める（振り分けない）
   vStatus("");
+  vAsked = 0; vGivenUp = new Set(); vEst = { usage: "none", storeys: "none" };
+  hideQuestion();                  // 棟ごとに聞き返しをリセット
   idx = i;
   const id = planOrder[idx];
   document.getElementById("survey-bid").textContent = id;
@@ -541,6 +543,7 @@ async function loadBuilding(i) {
     const cu = d.candidates.usage, cs = d.candidates.storeys;
     if (cu && !cu.unresolvable) estUsage = cu.value;
     if (cs && !cs.unresolvable) estStoreys = cs.value;
+    vEst = { usage: estState(cu), storeys: estState(cs) };  // 聞き返しの出し分け用
     const uTxt = cu ? (cu.unresolvable ? "判断不能" : (cu.display || "—")) : "—";
     const sTxt = cs ? (cs.unresolvable ? "判断不能" : (cs.display || "—")) : "—";
     estText = `推定：用途 <b>${uTxt}</b> ／ 階数 <b>${sTxt}</b>`;
@@ -566,6 +569,8 @@ async function loadBuilding(i) {
   const isDone = !!(draft && draft.done);
   saveBtn.textContent = isDone ? "保存済み（上書き保存）" : "保存して次へ";
   saveBtn.classList.toggle("done", isDone);
+
+  refreshVoiceFill();              // いまの埋まり具合を小さく表示
 }
 
 function readForm() {
@@ -584,8 +589,20 @@ function saveDraft() {
   lsSet(LS.draft(id), { ...readForm(), done: prev.done || false });
   document.getElementById("saved-flag").classList.remove("hidden");
 }
+function onFieldInput() {
+  saveDraft();
+  if (!voiceSupported) return;
+  // 手入力でも質問に答えられる：保留中の質問の項目が埋まったら、その質問を消す
+  if (vPending) {
+    const v = vPending === "usage"
+      ? document.getElementById("f-usage").value
+      : document.getElementById("f-storeys").value;
+    if ((vPending === "usage" && v) || (vPending === "storeys" && v !== "")) hideQuestion();
+  }
+  refreshVoiceFill();
+}
 for (const elid of ["f-usage", "f-storeys", "f-note"])
-  document.getElementById(elid).addEventListener("input", saveDraft);
+  document.getElementById(elid).addEventListener("input", onFieldInput);
 
 // 写真（カメラ→端末側で縮小）
 let currentPhoto = null;
@@ -670,6 +687,12 @@ let voiceSilent = false;     // 棟移動で止めた（振り分けず、メモ
 let voiceBase = "";          // 音声開始前のメモ（手入力を消さないため）
 let voiceFinal = "";         // 確定した認識テキストの蓄積（再開をまたいで保持）
 
+// 聞き返しのセッション状態（棟ごとにリセット）
+let vAsked = 0;              // これまで尋ねた質問数（3往復で打ち切り）
+let vPending = null;         // いま表示中の質問が尋ねている項目（usage/storeys）
+let vGivenUp = new Set();    // 「分からない」と答えた項目（判断不能として記録・もう聞かない）
+let vEst = { usage: "none", storeys: "none" };  // 自動推定の状態（質問の出し分け用）
+
 function vStatus(msg, isErr) {
   const el = document.getElementById("voice-status");
   el.textContent = msg || "";
@@ -744,6 +767,46 @@ function stopVoice(silent) {
   try { recog && recog.stop(); } catch {}
 }
 
+// 自動推定の状態を質問の出し分け用ラベルに畳む
+function estState(c) {
+  if (!c) return "none";
+  if (c.unresolvable) return "unresolvable";
+  return c.confidence_label === "低" ? "low" : "ok";
+}
+// いまの埋まり具合（サーバーへ送る状態 ＝ 画面の小表示のもと）
+function voiceStatusItems() {
+  const uVal = document.getElementById("f-usage").value;
+  const sVal = document.getElementById("f-storeys").value;
+  const uLbl = uVal ? (usageCodes.find((u) => String(u.code) === String(uVal)) || {}).label || uVal : null;
+  return {
+    usage: { filled: !!uVal, value: uLbl, est: vEst.usage },
+    storeys: { filled: sVal !== "", value: sVal === "" ? null : Number(sVal), est: vEst.storeys },
+  };
+}
+function refreshVoiceFill() {
+  if (!voiceSupported) return;
+  const st = voiceStatusItems();
+  const chip = (name, s, item) => {
+    if (vGivenUp.has(item)) return `<span class="chip">${name} <span class="gu">判断不能</span></span>`;
+    if (s.filled) return `<span class="chip">${name} <span class="ok">✓</span></span>`;
+    return `<span class="chip">${name} <span class="empty">空</span></span>`;
+  };
+  const rounds = vAsked > 0 ? `<span class="chip">音声 ${vAsked}往復</span>` : "";
+  const el = document.getElementById("voice-fill");
+  el.innerHTML = chip("用途", st.usage, "usage") + chip("階数", st.storeys, "storeys") + rounds;
+  el.classList.remove("hidden");
+}
+function showQuestion(text, target) {
+  vPending = target;
+  const el = document.getElementById("voice-question");
+  el.innerHTML = `❓ ${text}<span class="q-hint">🎤「音声で入力」で答える／手入力でもOK</span>`;
+  el.classList.remove("hidden");
+}
+function hideQuestion() {
+  vPending = null;
+  document.getElementById("voice-question").classList.add("hidden");
+}
+
 async function finishVoice() {
   voiceActive = false;
   vBtn(false);
@@ -754,13 +817,19 @@ async function finishVoice() {
   if (!text) { vStatus(""); return; }
 
   vStatus("内容を振り分け中…");
+  const askedPending = vPending;   // この発話が答えている質問の項目
   try {
     const res = await fetch("/api/voice_parse", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        text, building_id: planOrder[idx],
+        status: voiceStatusItems(), pending: askedPending,
+        givenup: [...vGivenUp], asked: vAsked,
+      }),
     });
     if (!res.ok) throw new Error(String(res.status));
     const d = await res.json();
+
     const filled = [];
     if (d.storeys != null) {
       document.getElementById("f-storeys").value = d.storeys;
@@ -774,10 +843,23 @@ async function finishVoice() {
         filled.push(`用途 ${lbl ? lbl.label : d.usage}`);
       }
     }
+    // 「分からない」と答えた項目は判断不能として記録し、もう聞かない
+    (d.dont_know || []).forEach((it) => vGivenUp.add(it));
     saveDraft();
-    vStatus(filled.length
-      ? `${filled.join("・")} を入力しました（ご確認を）`
-      : "読み取れる用途・階数はありませんでした（メモに残しました）");
+
+    if (d.question) {                       // まだ足りない → 質問を1つ出す
+      vAsked += 1;
+      showQuestion(d.question, d.question_target);
+      vStatus(filled.length ? `${filled.join("・")} を入力。次の質問にどうぞ`
+                            : "質問にお答えください（🎤 か手入力）");
+    } else {                                // 全部埋まった／これ以上聞かない
+      hideQuestion();
+      const gu = [...vGivenUp].map((i) => (i === "usage" ? "用途" : "階数"));
+      vStatus((filled.length ? `${filled.join("・")} を入力。` : "")
+        + (vAsked > 0 ? `音声 ${vAsked}往復で確認完了` : "確認しました")
+        + (gu.length ? `（${gu.join("・")}は判断不能）` : ""));
+    }
+    refreshVoiceFill();
   } catch {
     // 振り分け失敗でもメモは残っている。手入力で続けられる。
     vStatus("振り分けに失敗。話した内容はメモに残っています", true);

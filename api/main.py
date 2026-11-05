@@ -121,20 +121,29 @@ def usage_codes() -> list[dict]:
 
 class VoiceBody(BaseModel):
     text: str                         # 端末の音声認識が返した「認識後テキスト」だけ
+    building_id: str | None = None    # ログ用（音声は扱わない）
+    status: dict | None = None        # {usage:{filled,value,est}, storeys:{...}} 現在の埋まり具合
+    pending: str | None = None        # 直前の質問が尋ねた項目（usage/storeys）
+    givenup: list[str] | None = None  # 既に「分からない」と答えた項目（もう聞かない）
+    asked: int = 0                    # これまでに尋ねた質問数（3で打ち切り）
 
 
 @app.post("/api/voice_parse")
 def voice_parse(body: VoiceBody) -> dict:
-    """音声入力（試験的）：認識後テキストを Claude で用途・階数・特徴に振り分ける。
+    """音声入力（試験的）：認識後テキストを Claude で振り分け、足りなければ質問を1つ返す。
 
     受け取るのは認識後の **テキストだけ**（音声は扱わない・保存しない）。読み取れない
-    項目は null を返す（推測で埋めない）。入力ハッシュでキャッシュしログに残す。
-    API 未設定など失敗時は 503 を返し、UI 側は手入力にそのまま戻れる。
+    項目は null（推測で埋めない）。埋まっていない項目があれば、その建物の状況に合わせた
+    質問を1つ返す（全部埋まれば null）。質問は1度に1つ、3往復で打ち切る。入力ハッシュで
+    キャッシュしログに残す。API 未設定など失敗時は 503 を返し、UI は手入力へ戻れる。
     """
     from .voice import parse_voice
 
     try:
-        return parse_voice(body.text, load_usage_codes())
+        return parse_voice(
+            body.text, load_usage_codes(),
+            status=body.status, pending=body.pending,
+            givenup=body.givenup, asked=body.asked, building_id=body.building_id)
     except Exception as e:  # noqa: BLE001 UI は手入力へフォールバックする
         raise HTTPException(status_code=503, detail=f"音声の振り分けに失敗: {e}")
 
