@@ -16,6 +16,48 @@
 
 ---
 
+## 2026-11-05 現地写真を建物の画像として使う：撮影日・撮影者つきで確認画面/地図/レポート/CSV に
+
+- 背景 / きっかけ：現地調査（source=onsite）で撮った写真は `data/survey/` に保存して `evidence(kind='photo')` に紐づくだけだった。これを「その建物の画像」として、確認画面・地図・レポート・CSV で使えるようにする。
+- 判断：
+  - **撮影日は `evidence.created_at`（サーバーの時計）を正本**、**撮影者は `evidence.detail.operator` に保存**（写真のみ登録＝confirmations が無い場合でも撮影者を辿れるように）。`_save_survey_photo` に operator を渡すよう変更。
+  - **API**：`/api/buildings/{id}` に `photos`（url・captured_on・operator・source、撮影順）を追加。地図マーカー用に **`GET /api/photos`**（写真のある棟の重心・枚数・最新撮影日）を新設。
+  - **確認画面（`web/app.js`）**：画像枠に現地写真を出す。複数なら ‹ › で切り替え。供給源ラベルは「現地調査（YYYY-MM-DD 撮影）・撮影者」。写真が無ければ従来の LOD2/画像なし文言にフォールバック。
+  - **地図**：写真のある棟をシアンの点（`b-photo` 円レイヤ）で示し、クリックでその棟を開く。
+  - **レポート（`export/report.py`）**：現地調査の節に代表写真を最新 1〜2 枚、**相対パス `../../survey/<file>`**（`data/derived/export` から見た `data/survey`）で Markdown 埋め込み。撮影日・撮影者をキャプションに。Claude プロンプトからは写真ファイル名を除外。
+  - **CSV（`export/update_candidates.py`）**：`evidence_url` に写真の参照（`/survey/...`）を追加。**写真本体は同梱しない（容量・権利）＝参照のみ**。
+  - **注意喚起（`web/survey.html`・`survey.js`）**：写真欄に常時「⚠ 人や車のナンバー・表札が写っていないか確認してください」。撮影後は赤で強調。
+  - 写真は `data/survey/` のまま（git 管理外を維持）。
+- 根拠（実データのコピーで非破壊検証。再現：DB をコピーし onsite 確定＋写真2枚を投入）：`/api/photos` SQL＝1棟2枚・重心(139.68735,35.69505)・最新 2026-11-06。`_photos_for`＝captured_on 2026-11-06・撮影者「山田 太郎」。`fetch_rows` の `evidence_url` に `/survey/..._1.jpg;/survey/..._2.jpg`。`compute_facts.field_survey.sample_photos`＝2件、`render_markdown` が `![...](../../survey/...)` で2枚埋め込み＋「同梱しない」注記。`node --check`（app.js/survey.js）OK、`py_compile` OK、`pytest tests/test_export.py tests/test_report.py` 7 passed。**稼働中サーバーは `--reload` 無しで起動のため新コード未反映＝再起動が必要**（検証は DB コピーで実施、ライブ DB は未変更）。
+- 影響範囲：`api/main.py`（`_save_survey_photo` に operator・`_photos_for`・`/api/buildings` の photos・`/api/photos`）、`web/app.js`・`style.css`（画像枠の写真表示＋切替、`b-photo` レイヤ）、`web/survey.html`・`survey.js`（注意喚起）、`export/update_candidates.py`（`evidence_url` に写真参照）、`export/report.py`（代表写真の埋め込み）。写真は `data/survey/` のまま git 管理外。
+
+---
+
+## 2026-11-05 画像なしの外形比較（OSM / Overture）でのずれ検出：調査のみ・絞り込みには不採用
+
+- 背景 / きっかけ：画像を使わず、PLATEAU の外形と外部ベクタ（OSM 建物ポリゴン・Overture Buildings）のずれ（IoU・属性の食い違い）で「調査すべき棟」を絞り込めるかを調べる（実装はしない）。画像判定を後回しにした（2026-11-03）後の、別ルートの見極め。
+- 判断：**使えない。止める。** 外部ベクタの外形比較は**調査トリガにしない**。変化検出は既存の `estimate/version_diff.py`（PLATEAU 2023↔2025、同一出自の ID＋IoU、中央値 1.000・年区間つき）を主とする。理由は下の5点：
+  1. **外部2源は独立でない。** Overture Buildings はデモ範囲で **96.5% が OpenStreetMap 由来**（下記）。「OSM と Overture の2源で裏取り」は成立せず、実質 OSM 1源。
+  2. **ずれの大半は構造ノイズ（分割粒度の違い）。** OSM/Overture は PLATEAU の約2倍の別棟に分割（長屋・附属屋・建物部分）。縁効果を全 PLATEAU 照合で補正しても Overture-only は **58.6%** 残る＝アーティファクトでなく本質的。本当の変化と機械的に分離できない（＝設計書「ノイズと本当の変化を区別」で区別不可側）。
+  3. **建築年が無い。** OSM にも Overture にも建築年がなく、Overture の `update_time` は **OSM の編集時刻**（2011–2026 に散在、2012/2020 に取込スパイク）であって竣工年ではない。よって「PLATEAU 2025年度版より新しいか」を判定できない＝変化検出の肝が欠ける。
+  4. **対応が取れる棟は属性もよく一致**（新情報が薄い）：高さ中央差 0.0m、階数は OSM `building:levels`/Overture `num_floors` と PLATEAU(h÷3.8) が |diff|≤1 で 71%。食い違う棟も真の変化とタグ誤りを切り分けられない。
+  5. **PLATEAU-only（外部に無い）は不明群で 43–49% と高いが、OSM の過少マッピングが主因**で「新築・変化」の証拠にならない（OSM 被覆との交絡）。
+  - **唯一の限定的な余地**：OSM `building:levels` / Overture `num_floors` を、外部対応のある不明群（331–367棟）の**階数推定の evidence チップ**として添える程度（ターゲティング信号ではない）。やるなら candidates ではなく evidence に入れる（公式データ非上書きの原則どおり）。
+- 根拠（実データ・デモ範囲で実測。再現方法つき）：
+  - **範囲**：都庁中心・約2km角 bbox（W139.6807 S35.6806 E139.7027 N35.6986、合意済みデモ範囲）。PLATEAU 外形（`data/derived/buildings.geojson`、重心が bbox 内）＝**4,559 棟（不明群 t=1：645）**。
+  - **OSM**（Overpass API, 2026-11-05 取得, UA 必須＝無いと 406, ODbL）：建物 way ポリゴン **9,447**＋relation 184。
+    - PLATEAU↔OSM：重なりあり **88.6%** / PLATEAU-only **11.4%（521）**。**median IoU 0.805**。IoU<0.3＝475（10.4%）。複数 OSM と重なる（分割差）**13.2%**。
+    - 不明群 645：OSM 対応 367 / PLATEAU-only **278（43%）**、うち低 IoU(<0.3) 173。
+    - 高さ：matched(IoU≥0.3) で両方に値 n=1,721、中央差(PLATEAU−OSM) **0.0m**、|差|>3m は 156（9%）。`building:levels` あり 1,876。
+    - OSM-only 60.4%（縁効果を含む粗値）。
+  - **Overture Buildings**（`s3://overturemaps-us-west-2/release/2026-10-21.0`、スキーマ v2.0.0、CC BY 4.0＋sources 継承、DuckDB httpfs で bbox プッシュダウン取得 ≈51s）：bbox 内 **9,109 棟**。
+    - **sources：OpenStreetMap 8,789（96.5%）/ ML(Zenodo doi:10.5281/zenodo.8174931) 197 / Microsoft ML 123** → 密集部では実質 OSM。
+    - PLATEAU↔Overture：重なり **87.9%** / PLATEAU-only **12.1%**。**median IoU 0.743**。不明群 PLATEAU-only **49%（314/645）**。分割差 15.4%。**Overture-only 58.6%**（全 PLATEAU 57,780 と照合＝縁効果補正済）。
+    - `num_floors` クロス（IoU≥0.5, n=705）：PLATEAU(h÷3.8) と |diff|≤1 が **71%**、median diff 0。属性保有は height 1,464 / num_floors 1,801（9,109 中）＝疎。
+  - **再現**：Overpass（`way/relation["building"]`＋UA）→ DuckDB spatial（in-memory, ファイルロック回避）で IoU。Overture は上記 S3 を bbox で取得。IoU は `ST_Transform`(PROJ) 不在のため経緯度のまま算出（約2km角では局所アフィン≒一定で面積比＝IoU は保存）。スクリプトは scratchpad の投げ捨て（**リポジトリに入れない**＝実装しない方針どおり）。取得した OSM/Overture データも git 管理外。
+  - **作業見積（やる場合の目安）**：新宿区全域の OSM/Overture 取得＋relation/マルチポリゴン組立＋EPSG:6677 再投影＋分割対応（1:N・N:M）IoU＋ノイズ裾の人手トリアージで概ね **2–3日**。ノイズ主体かつ建築年の無い信号に見合わず、半日ルートのオルソ視認レイヤ（2026-11-05 の別エントリ）や既成の version_diff に劣る。
+- 影響範囲：調査のみ。コード・データはリポジトリ未追加。画像なしの変化検出は **version_diff を主**とし、外部ベクタの外形比較は不採用（将来、階数推定の evidence として `num_floors`/`building:levels` を限定利用する余地のみ残す）。
+
 ## 2026-11-05 訪問順の提案（距離・近似TSP）。経路の線は引かない（規約順守）
 
 - 背景 / きっかけ：「距離から順番を提案し、最適なルートを表示したい」という要望。ただし "ルート表示（経路を描く）" は Mapillary 規約（ナビ・経路案内の禁止＝CLAUDE.md「絶対に守ること」）と、前回自分で決めた「経路は引かない」方針に抵触するため、止めて相談した。

@@ -171,11 +171,36 @@ def compute_facts(con, city_code: str = CITY_CODE, version: str = VERSION) -> di
         """,
         [version, city_code],
     ).fetchone()[0]
+    # 代表写真（最新 1〜2 枚）をレポートに相対パスで埋め込むためのメタ
+    sample_rows = con.execute(
+        """
+        SELECT e.building_id, e.detail, e.created_at
+        FROM evidence e
+        JOIN buildings b ON b.building_id=e.building_id AND b.version=e.version
+        WHERE e.version=? AND b.city_code=? AND e.kind='photo'
+        ORDER BY e.created_at DESC
+        LIMIT 2
+        """,
+        [version, city_code],
+    ).fetchall()
+    sample_photos = []
+    for bid, detail, created in sample_rows:
+        try:
+            d = json.loads(detail) if detail else {}
+        except (TypeError, ValueError):
+            d = {}
+        if d.get("filename"):
+            sample_photos.append({
+                "building_id": bid, "filename": d["filename"],
+                "operator": d.get("operator"),
+                "captured_on": str(created)[:10] if created is not None else None,
+            })
     field_survey = {
         "buildings": field_buildings,
         "rows": sum(r[1] for r in field_rows),
         "photos": field_photos,
         "by_attribute": {ONSITE_ATTR_LABEL.get(a, a): n for a, n, _ in field_rows},
+        "sample_photos": sample_photos,
     }
 
     return {
@@ -201,6 +226,11 @@ def compute_facts(con, city_code: str = CITY_CODE, version: str = VERSION) -> di
 def _facts_for_prompt(facts: dict) -> dict:
     """Claude に渡す facts（判断に要らない building_id 配列などは入れない）。"""
     slim = dict(facts)
+    # 写真のファイル名は文章生成に不要なので落とす（プロンプトを軽く保つ）
+    if slim.get("field_survey"):
+        fs = dict(slim["field_survey"])
+        fs.pop("sample_photos", None)
+        slim["field_survey"] = fs
     # onsite_groups は理由・棟数・帯だけにして軽くする
     slim["onsite_groups"] = [
         {"attribute": g["attribute"], "reason": g["reason"], "count": g["count"]}
@@ -356,6 +386,21 @@ def render_markdown(facts: dict, prose: dict, model: str, meta: dict) -> str:
         if fs.get("by_attribute"):
             L.append(_table(["属性", "現地で確定した件数"],
                             [[k, v] for k, v in fs["by_attribute"].items()]))
+            L.append("")
+        # 代表的な現地写真を 1〜2 枚、相対パスで埋め込む（写真本体は同梱しない）
+        for ph in fs.get("sample_photos", []):
+            cap = ph["building_id"]
+            if ph.get("captured_on"):
+                cap += f"・{ph['captured_on']} 撮影"
+            if ph.get("operator"):
+                cap += f"・{ph['operator']}"
+            L.append(f"![現地写真 {cap}](../../survey/{ph['filename']})")
+            L.append("")
+            L.append(f"*現地写真：{cap}*")
+            L.append("")
+        if fs.get("sample_photos"):
+            L.append("※ 写真は `data/survey/` にあり、本レポートからは相対パスで参照しています"
+                     "（容量と権利のため、CSV / GeoJSON には同梱しません）。")
             L.append("")
     else:
         L.append("現地調査で確定した棟はまだありません。")

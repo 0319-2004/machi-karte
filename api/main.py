@@ -217,6 +217,7 @@ def building(building_id: str) -> dict:
             "SELECT count(*) FROM candidates WHERE version=? AND building_id=? "
             "AND source='version_diff'", [VERSION, bid],
         ).fetchone()[0] > 0
+        photos = _photos_for(con, bid)
 
     attributes = {
         "id": bid,
@@ -232,7 +233,7 @@ def building(building_id: str) -> dict:
     }
     return {"attributes": attributes, "candidates": candidates,
             "confirmations": confirmations, "is_new": is_new,
-            "confirmed": len(confirmations) > 0}
+            "confirmed": len(confirmations) > 0, "photos": photos}
 
 
 # --- 計測：建物を開いた時刻を記録 -------------------------------------------
@@ -328,8 +329,13 @@ class SurveyBody(BaseModel):
     photo: str | None = None          # data URL（base64, 端末側で縮小済み）。無くてよい
 
 
-def _save_survey_photo(con, building_id: str, photo: str) -> dict | None:
-    """data URL の写真を data/survey/ に保存し、evidence(kind='photo') に紐づける。"""
+def _save_survey_photo(con, building_id: str, photo: str,
+                       operator: str | None = None) -> dict | None:
+    """data URL の写真を data/survey/ に保存し、evidence(kind='photo') に紐づける。
+
+    撮影日は evidence.created_at（サーバー側の時計）を正本にし、撮影者（operator）は
+    detail に残す（写真のみの登録で confirmations が無くても撮影者を辿れるように）。
+    """
     m = re.match(r"^data:(image/(?:jpeg|png|webp));base64,(.+)$", photo, re.DOTALL)
     if not m:
         return None
@@ -354,9 +360,34 @@ def _save_survey_photo(con, building_id: str, photo: str) -> dict | None:
         "(evidence_id, building_id, version, kind, label, detail) "
         "VALUES (?, ?, ?, 'photo', ?, ?)",
         [eid, building_id, VERSION, "現地写真", json.dumps(
-            {"source": "onsite", "filename": fname, "url": url}, ensure_ascii=False)],
+            {"source": "onsite", "filename": fname, "url": url,
+             "operator": (operator or "").strip() or None}, ensure_ascii=False)],
     )
     return {"evidence_id": eid, "url": url}
+
+
+def _photos_for(con, bid: str) -> list[dict]:
+    """建物の現地写真を撮影順（created_at 昇順）で返す。画面の画像枠が読む。"""
+    rows = con.execute(
+        "SELECT detail, created_at FROM evidence "
+        "WHERE version=? AND building_id=? AND kind='photo' ORDER BY created_at",
+        [VERSION, bid],
+    ).fetchall()
+    out = []
+    for detail, created in rows:
+        try:
+            d = json.loads(detail) if detail else {}
+        except (TypeError, ValueError):
+            d = {}
+        if not d.get("url"):
+            continue
+        out.append({
+            "url": d["url"],
+            "operator": d.get("operator"),
+            "captured_on": str(created)[:10] if created is not None else None,
+            "source": d.get("source", "onsite"),
+        })
+    return out
 
 
 @app.post("/api/survey")
@@ -380,7 +411,7 @@ def survey(body: SurveyBody) -> dict:
         cands = _candidates_for(con, building_id)
         photo_info = None
         if body.photo:
-            photo_info = _save_survey_photo(con, building_id, body.photo)
+            photo_info = _save_survey_photo(con, building_id, body.photo, body.operator)
 
         opened_sql = ("COALESCE((SELECT opened_at FROM open_events "
                       "WHERE version=? AND building_id=?), now())")
@@ -429,6 +460,26 @@ def confirmed() -> dict:
     onsite = [r[0] for r in rows if r[1]]
     desk = [r[0] for r in rows if not r[1]]
     return {"onsite": onsite, "desk": desk}
+
+
+@app.get("/api/photos")
+def photos() -> list[dict]:
+    """現地写真がある棟を、重心座標・枚数・最新の撮影日つきで返す（地図のマーカー用）。"""
+    with db_lock:
+        rows = get_con().execute(
+            """
+            SELECT e.building_id, count(*) AS n, max(e.created_at) AS latest,
+                   ST_X(ST_Centroid(b.geom_4326)) AS lon,
+                   ST_Y(ST_Centroid(b.geom_4326)) AS lat
+            FROM evidence e
+            JOIN buildings b ON b.building_id=e.building_id AND b.version=e.version
+            WHERE e.version=? AND e.kind='photo'
+            GROUP BY e.building_id, b.geom_4326
+            """,
+            [VERSION],
+        ).fetchall()
+    return [{"building_id": bid, "count": n, "latest": str(latest)[:10],
+             "lon": lon, "lat": lat} for (bid, n, latest, lon, lat) in rows]
 
 
 # --- 計測の集計（処理済みN棟 / 合計M分 / 中央値S秒） ------------------------

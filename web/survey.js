@@ -580,8 +580,11 @@ function setPhoto(dataUrl) {
   currentPhoto = dataUrl || null;
   const thumb = document.getElementById("photo-thumb");
   const del = document.getElementById("photo-del");
+  const note = document.getElementById("photo-note");
   if (currentPhoto) { thumb.src = currentPhoto; thumb.style.display = "inline"; del.classList.remove("hidden"); }
   else { thumb.removeAttribute("src"); thumb.style.display = "none"; del.classList.add("hidden"); }
+  // 写真を付けたら注意書きを強調（人・ナンバー・表札の写り込み確認）
+  if (note) note.classList.toggle("alert", !!currentPhoto);
 }
 function downscale(file) {
   return new Promise((resolve, reject) => {

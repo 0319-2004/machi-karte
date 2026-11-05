@@ -85,6 +85,26 @@ def _evidence_map(con, version: str) -> dict:
     return out
 
 
+def _photo_map(con, version: str) -> dict:
+    """building_id → 現地写真の参照（/survey/... のパス）のリスト。evidence_url に入れる。
+
+    写真そのものは出力に同梱しない（容量と権利）。参照（URL/相対パス）だけを出す。
+    """
+    out: dict[str, list] = {}
+    for bid, detail in con.execute(
+        "SELECT building_id, detail FROM evidence "
+        "WHERE version=? AND kind='photo' ORDER BY created_at", [version]
+    ).fetchall():
+        try:
+            d = json.loads(detail) if detail else {}
+        except (TypeError, ValueError):
+            d = {}
+        url = d.get("url")
+        if url:
+            out.setdefault(bid, []).append(url)
+    return out
+
+
 def _proposed_label(attr: str, value, vmin, vmax) -> str:
     if attr == "usage":
         return _USAGE_LABELS.get(str(value), str(value) if value is not None else "")
@@ -111,6 +131,7 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
     ).fetchall()
     cand = _candidate_map(con, version)
     ev = _evidence_map(con, version)
+    photo_refs = _photo_map(con, version)
 
     out = []
     for (bid, attr, cval, accepted, cat, cby, raw_usage, raw_storeys,
@@ -134,6 +155,8 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
             source, confidence, reasoning = "manual", None, ""
 
         ev_labels = ";".join(ev[e] for e in c.get("evidence_ids", []) if e in ev)
+        # 現地写真の参照を evidence_url に足す（写真本体は同梱しない。参照のみ）
+        evidence_url = ";".join(x for x in [ev_labels, *photo_refs.get(bid, [])] if x)
 
         out.append({
             "building_id": bid,
@@ -148,7 +171,7 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
             "confirmed_by": cby or "調査担当者",
             "confirmed_via": confirmed_via or "desk",
             "confirmed_at": str(cat) if cat is not None else "",
-            "evidence_url": ev_labels,
+            "evidence_url": evidence_url,
             "value_min": "" if vmin is None else vmin,
             "value_max": "" if vmax is None else vmax,
         })

@@ -50,6 +50,7 @@ let onsiteData = null;      // 判断不能の集約（/api/unresolved）
 let onsiteActiveKey = null; // 地図で絞り込み中の区分キー
 const COLOR_ONSITE = "#8e24aa";   // 現地確認が必要な棟のハイライト（紫）
 const COLOR_DONE_ONSITE = "#2e7d32"; // 現地調査で確定した棟（緑）
+const COLOR_PHOTO = "#00bcd4";    // 現地写真がある棟のマーカー（シアン）
 const ATTR_LABEL = { usage: "用途", storeys: "階数（地上）", year_built: "建築年" };
 
 // --- 件数カウンタ -----------------------------------------------------------
@@ -243,7 +244,38 @@ function addBuildingLayers() {
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
   }
+
+  // 現地写真がある棟のマーカー（カメラ色の点）。クリックでその棟を開く。
+  map.addSource("photos", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "b-photo", type: "circle", source: "photos",
+    paint: {
+      "circle-radius": 6, "circle-color": COLOR_PHOTO,
+      "circle-stroke-color": "#ffffff", "circle-stroke-width": 2,
+    },
+  });
+  map.on("click", "b-photo", (e) => selectBuilding(e.features[0].properties.id));
+  map.on("mouseenter", "b-photo", () => (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", "b-photo", () => (map.getCanvas().style.cursor = ""));
+
   loadConfirmed();
+  loadPhotos();
+}
+
+// 現地写真がある棟を地図にマーカー表示（/api/photos の重心点）
+async function loadPhotos() {
+  try {
+    const list = await (await fetch("/api/photos")).json();
+    const feats = list
+      .filter((p) => p.lon != null && p.lat != null)
+      .map((p) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+        properties: { id: p.building_id, count: p.count, latest: p.latest },
+      }));
+    const src = map.getSource("photos");
+    if (src) src.setData({ type: "FeatureCollection", features: feats });
+  } catch {}
 }
 
 // 現地調査で確定した棟（source='onsite'）を緑でハイライトする
@@ -366,6 +398,55 @@ function attrRowHtml(key, cand, a) {
   );
 }
 
+// 画像枠：現地写真があればそれを出す（複数なら切り替え）。無ければ従来の文言。
+function imageBlockHtml(d) {
+  const photos = d.photos || [];
+  if (photos.length > 0) {
+    const p0 = photos[0];
+    const nav = photos.length > 1
+      ? `<button class="ph-nav prev" title="前の写真">‹</button>` +
+        `<button class="ph-nav next" title="次の写真">›</button>` +
+        `<span class="ph-count"><span id="ph-idx">1</span>/${photos.length}</span>`
+      : "";
+    return (
+      `<div class="c-image has-photo">` +
+      `<img id="ph-img" src="${p0.url}" alt="現地写真" />${nav}` +
+      `<span class="src" id="ph-src">${photoSrcLabel(p0)}</span></div>`
+    );
+  }
+  const hasTex = d.attributes.lod_type === "LOD2";
+  const imgText = hasTex ? "LOD2テクスチャあり（実写真は未取得）" : "画像なし";
+  return (
+    `<div class="c-image">${imgText}` +
+    `<span class="src">供給源：実写真は現地調査で取得（未取得）</span></div>`
+  );
+}
+
+function photoSrcLabel(p) {
+  const date = p.captured_on ? `${p.captured_on} 撮影` : "撮影日不明";
+  const who = p.operator ? `・${p.operator}` : "";
+  return `現地調査（${date}）${who}`;
+}
+
+// 複数写真の切り替え（前/次）。枠内の img と供給源ラベルを差し替える。
+function wirePhotoNav(photos) {
+  if (!photos || photos.length <= 1) return;
+  let i = 0;
+  const img = document.getElementById("ph-img");
+  const idxEl = document.getElementById("ph-idx");
+  const srcEl = document.getElementById("ph-src");
+  const show = () => {
+    const p = photos[i];
+    img.src = p.url;
+    if (idxEl) idxEl.textContent = i + 1;
+    if (srcEl) srcEl.textContent = photoSrcLabel(p);
+  };
+  const prev = confirmScroll.querySelector(".ph-nav.prev");
+  const next = confirmScroll.querySelector(".ph-nav.next");
+  if (prev) prev.addEventListener("click", () => { i = (i - 1 + photos.length) % photos.length; show(); });
+  if (next) next.addEventListener("click", () => { i = (i + 1) % photos.length; show(); });
+}
+
 function renderConfirm(d) {
   currentData = d;
   const a = d.attributes;
@@ -383,12 +464,9 @@ function renderConfirm(d) {
     (a.is_target ? `<span class="badge target">調査対象（不明群）</span>` : "") +
     (d.is_new ? `<span class="badge new">新規出現（版間差分）</span>` : "");
 
-  const hasTex = a.lod_type === "LOD2";
-  const imgText = hasTex ? "LOD2テクスチャあり（実写真は未取得）" : "画像なし";
   confirmScroll.innerHTML =
     `<div class="c-head"><h3>${a.id}</h3><div class="c-badges">${badges}</div></div>` +
-    `<div class="c-image">${imgText}` +
-    `<span class="src">供給源：実写真（Mapillary/オルソ）は Phase 7 で取得</span></div>` +
+    imageBlockHtml(d) +
     `<div class="c-attrs">${rows}</div>` +
     `<div class="c-usage"><label>用途コード（修正する場合に選ぶ）</label>` +
     `<select id="usage-select">${opts}</select></div>`;
@@ -407,6 +485,7 @@ function renderConfirm(d) {
 
   document.getElementById("btn-keep").addEventListener("click", attemptKeep);
   document.getElementById("btn-edit").addEventListener("click", () => doConfirm(false));
+  wirePhotoNav(d.photos);
   confirmScroll.scrollTop = 0;
   confirmPanel.classList.remove("hidden");
 }

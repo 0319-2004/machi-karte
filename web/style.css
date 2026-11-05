@@ -116,6 +116,16 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Hiragino Sans", s
   position: relative; margin-bottom: 10px; }
 .c-image .src { position: absolute; bottom: 4px; right: 6px; font-size: 10px; color: #b0bec5;
   background: rgba(255,255,255,0.8); padding: 1px 5px; border-radius: 4px; }
+/* 現地写真を出すとき：枠いっぱいに写真、下に供給源ラベル（撮影日・撮影者） */
+.c-image.has-photo { border-style: solid; border-color: #00bcd4; background: #000; overflow: hidden; padding: 0; }
+.c-image.has-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.c-image.has-photo .src { color: #37474f; background: rgba(255,255,255,0.88); }
+.c-image .ph-nav { position: absolute; top: 50%; transform: translateY(-50%); border: none;
+  width: 26px; height: 32px; background: rgba(0,0,0,0.45); color: #fff; font-size: 20px;
+  line-height: 1; cursor: pointer; border-radius: 4px; }
+.c-image .ph-nav.prev { left: 5px; } .c-image .ph-nav.next { right: 5px; }
+.c-image .ph-count { position: absolute; top: 4px; left: 6px; font-size: 10px; color: #fff;
+  background: rgba(0,0,0,0.5); padding: 1px 6px; border-radius: 8px; }
 
 /* 属性：現在 → 推定 */
 .c-attrs { display: flex; flex-direction: column; gap: 8px; }

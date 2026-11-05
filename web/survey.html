@@ -136,6 +136,8 @@
     .photo-row input[type=file] { display:none; }
     #photo-thumb { height:46px; border-radius:6px; display:none; }
     .photo-del { border:none; background:none; color:var(--sub); font-size:13px; text-decoration:underline; }
+    .photo-note { margin:6px 0 0; font-size:12px; line-height:1.5; color:var(--sub); }
+    .photo-note.alert { color:#c62828; font-weight:600; }
     .saved-flag { font-size:12px; color:var(--ok); } .err { font-size:12px; color:#c62828; }
     .nav { display:flex; gap:8px; padding:8px var(--pad); border-top:1px solid var(--line); background:var(--bg); }
     .nav .side { flex:none; width:52px; border:1px solid var(--line); background:#fff;
@@ -224,6 +226,7 @@
             <img id="photo-thumb" alt="撮影した写真" />
             <button type="button" class="photo-del hidden" id="photo-del">削除</button>
           </div>
+          <p class="photo-note" id="photo-note">⚠ 人や車のナンバー・表札が写っていないか確認してください。</p>
         </div>
       </div>
       <div class="field">
