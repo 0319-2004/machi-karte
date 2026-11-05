@@ -72,6 +72,20 @@
             padding:9px 14px;border-radius:20px;font:600 13px system-ui,sans-serif;
             text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,.3)">📱 現地調査</a>
 
+  <!-- 確度が低い属性を「そのまま確定」しようとしたときの確認ダイアログ -->
+  <div id="lowconf-modal" class="hidden">
+    <div class="lc-box">
+      <h3>確度の低い属性があります</h3>
+      <p id="lc-attrs"></p>
+      <p class="lc-msg">この属性は確度が低いため、現地確認を推奨します。それでも確定しますか？</p>
+      <div class="lc-actions">
+        <button id="lc-survey" class="primary">現地確認リストに追加（確定しない）</button>
+        <button id="lc-proceed">それでも確定する</button>
+        <button id="lc-cancel">やめる</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="/app.js"></script>
 </body>

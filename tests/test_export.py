@@ -109,7 +109,7 @@ def test_row_values(tmp_path):
     # 修正した行は source=manual、confidence/reasoning 空
     m = rows[("B2", "usage")]
     assert m["source"] == "manual" and m["confidence"] == "" and m["reasoning"] == ""
-    assert m["confirmed_by"] == "担当者"   # confirmed_by 未入力の既定
+    assert m["confirmed_by"] == "調査担当者"   # confirmed_by 未入力の既定
 
     # 建築年は区間。proposed は '2022-2024'、value_min/max 別列
     y = rows[("B3", "year_built")]

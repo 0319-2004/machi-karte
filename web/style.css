@@ -156,6 +156,34 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Hiragino Sans", s
 .c-hint { margin-top: 7px; font-size: 11px; color: #b0bec5; text-align: center; }
 .c-hint kbd { background: #eceff1; border-radius: 4px; padding: 1px 5px; font-family: inherit; }
 
+/* 確定者名の入力 */
+.c-operator { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+.c-operator label { font-size: 12px; color: #607d8b; flex: 0 0 auto; }
+.c-operator input { flex: 1; padding: 7px 9px; border: 1px solid #cfd8dc; border-radius: 7px;
+  font-size: 14px; }
+
+/* 現地予定タグ（優先度リスト） */
+#target-list .tag.survey { background: #8e24aa; color: #fff; }
+
+/* 低確度の確認ダイアログ */
+#lowconf-modal { position: fixed; inset: 0; z-index: 20; display: flex;
+  align-items: center; justify-content: center; background: rgba(0,0,0,0.45); }
+#lowconf-modal.hidden { display: none; }
+#lowconf-modal .lc-box { background: #fff; border-radius: 12px; padding: 20px 22px;
+  max-width: 380px; width: 88%; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+#lowconf-modal h3 { margin: 0 0 10px; font-size: 17px; color: #bf360c; }
+#lowconf-modal #lc-attrs { font-size: 13px; font-weight: 700; color: #37474f; margin: 0 0 6px; }
+#lowconf-modal .lc-msg { font-size: 13.5px; color: #455a64; line-height: 1.6; margin: 0 0 16px; }
+#lowconf-modal .lc-actions { display: flex; flex-direction: column; gap: 8px; }
+#lowconf-modal .lc-actions button { padding: 12px; border: 0; border-radius: 9px; cursor: pointer;
+  font-size: 14px; font-weight: 700; }
+#lowconf-modal #lc-survey { background: #8e24aa; color: #fff; }
+#lowconf-modal #lc-survey:hover { background: #6a1b9a; }
+#lowconf-modal #lc-proceed { background: #eceff1; color: #bf360c; }
+#lowconf-modal #lc-proceed:hover { background: #ffccbc; }
+#lowconf-modal #lc-cancel { background: #eceff1; color: #546e7a; }
+#lowconf-modal #lc-cancel:hover { background: #cfd8dc; }
+
 #attr-link {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2;
   background: rgba(255,255,255,0.9); padding: 6px 12px; border-radius: 6px;

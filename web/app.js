@@ -37,7 +37,15 @@ let targetsOnly = false;
 let usageCodes = [];
 let targetList = [];        // 優先度順
 let current = null;         // 選択中の building_id
+let currentData = null;     // 選択中の建物の詳細（/api/buildings の応答）
 const done = new Set();     // このセッションで確定した building_id
+const surveyQueued = new Set();  // 現地確認リストに回した building_id（低確度）
+const DESK_OPERATOR_LS = "mk.desk.operator";     // 確定者名（机上）
+const SURVEY_SELECTED_LS = "mk.survey.selected"; // 現地調査モードが読む選択リスト
+
+function getDeskOperator() {
+  return localStorage.getItem(DESK_OPERATOR_LS) || "調査担当者";
+}
 let onsiteData = null;      // 判断不能の集約（/api/unresolved）
 let onsiteActiveKey = null; // 地図で絞り込み中の区分キー
 const COLOR_ONSITE = "#8e24aa";   // 現地確認が必要な棟のハイライト（紫）
@@ -282,6 +290,7 @@ function renderList() {
     const h = t.height_m != null ? t.height_m.toFixed(1) + "m" : "高さ不明";
     const tags =
       (t.is_new ? `<span class="tag new">新規</span>` : "") +
+      (surveyQueued.has(t.id) ? `<span class="tag survey">現地予定</span>` : "") +
       (t.has_image
         ? `<span class="tag img" title="LOD2テクスチャあり（3D都市モデルの面テクスチャ。実写真ではない）">LOD2</span>`
         : "");
@@ -358,6 +367,7 @@ function attrRowHtml(key, cand, a) {
 }
 
 function renderConfirm(d) {
+  currentData = d;
   const a = d.attributes;
   const c = d.candidates;
   const order = ["usage", "storeys", "year_built"];
@@ -383,22 +393,80 @@ function renderConfirm(d) {
     `<div class="c-usage"><label>用途コード（修正する場合に選ぶ）</label>` +
     `<select id="usage-select">${opts}</select></div>`;
   confirmFoot.innerHTML =
+    `<div class="c-operator"><label for="operator-input">確定者</label>` +
+    `<input id="operator-input" type="text" placeholder="調査担当者" /></div>` +
     `<div class="c-actions">` +
     `<button id="btn-keep">そのまま確定</button>` +
     `<button id="btn-edit">修正して確定</button></div>` +
     `<div class="c-hint"><kbd>Enter</kbd> でそのまま確定 → 次の優先棟へ</div>`;
 
-  document.getElementById("btn-keep").addEventListener("click", () => doConfirm(true));
+  const opEl = document.getElementById("operator-input");
+  opEl.value = getDeskOperator();
+  opEl.addEventListener("input", () =>
+    localStorage.setItem(DESK_OPERATOR_LS, opEl.value.trim() || "調査担当者"));
+
+  document.getElementById("btn-keep").addEventListener("click", attemptKeep);
   document.getElementById("btn-edit").addEventListener("click", () => doConfirm(false));
   confirmScroll.scrollTop = 0;
   confirmPanel.classList.remove("hidden");
 }
 
+// 低確度の属性名を集める（usage/storeys/year_built のうち confidence_label が「低」）
+function lowConfidenceAttrs(d) {
+  const names = [];
+  for (const k of ["usage", "storeys", "year_built"]) {
+    const cand = d.candidates[k];
+    if (cand && !cand.unresolvable && cand.confidence_label === "低")
+      names.push(ATTR_META[k] ? ATTR_META[k].name : k);
+  }
+  return names;
+}
+
+// 「そのまま確定」の入口。低確度があれば一度確認を挟む（高さ119.5m×供給処理施設の誤確定を防ぐ）
+function attemptKeep() {
+  if (!current || !currentData) return;
+  const low = lowConfidenceAttrs(currentData);
+  if (low.length === 0) return doConfirm(true);
+  openLowConfModal(low);
+}
+
+// --- 低確度の確認ダイアログ -------------------------------------------------
+const lowModal = document.getElementById("lowconf-modal");
+
+function openLowConfModal(lowNames) {
+  document.getElementById("lc-attrs").textContent =
+    "確度が低い属性：" + lowNames.join("・");
+  lowModal.classList.remove("hidden");
+}
+function closeLowConfModal() { lowModal.classList.add("hidden"); }
+
+// 確定せず、現地調査モードの選択リストに追加する（現地確認に回す）
+function queueForSurvey(id) {
+  if (!id) return;
+  let sel = [];
+  try { sel = JSON.parse(localStorage.getItem(SURVEY_SELECTED_LS)) || []; } catch {}
+  if (!sel.includes(id)) sel.push(id);
+  localStorage.setItem(SURVEY_SELECTED_LS, JSON.stringify(sel));
+  surveyQueued.add(id);
+  renderList();
+  openNext(id);   // 確定はせず、次の優先棟へ送る
+}
+
+document.getElementById("lc-proceed").addEventListener("click", () => {
+  closeLowConfModal(); doConfirm(true);
+});
+document.getElementById("lc-cancel").addEventListener("click", closeLowConfModal);
+document.getElementById("lc-survey").addEventListener("click", () => {
+  const id = current; closeLowConfModal(); queueForSurvey(id);
+});
+
 async function doConfirm(accepted) {
   if (!current) return;
   const id = current;
   const sel = document.getElementById("usage-select");
-  const body = { accepted, usage: sel ? sel.value : null };
+  const opEl = document.getElementById("operator-input");
+  const operator = (opEl && opEl.value.trim()) || getDeskOperator();
+  const body = { accepted, usage: sel ? sel.value : null, operator };
   await fetch(`/api/confirm/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -424,10 +492,15 @@ function openNext(afterId) {
   else closeConfirm();   // 全部確定
 }
 
-// --- キー操作：Enter でそのまま確定 ----------------------------------------
+// --- キー操作：Enter でそのまま確定（低確度なら確認を挟む） ----------------
 document.addEventListener("keydown", (e) => {
+  // 低確度ダイアログが開いているときは Esc で閉じるだけ（誤確定を防ぐ）
+  if (!lowModal.classList.contains("hidden")) {
+    if (e.key === "Escape") closeLowConfModal();
+    return;
+  }
   if (confirmPanel.classList.contains("hidden")) return;
-  if (e.key === "Enter") { e.preventDefault(); doConfirm(true); }
+  if (e.key === "Enter") { e.preventDefault(); attemptKeep(); }
   else if (e.key === "Escape") closeConfirm();
 });
 

@@ -145,7 +145,7 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
             "source": source or "",
             "confidence": "" if confidence is None else round(float(confidence), 2),
             "reasoning": reasoning or "",
-            "confirmed_by": cby or "担当者",
+            "confirmed_by": cby or "調査担当者",
             "confirmed_via": confirmed_via or "desk",
             "confirmed_at": str(cat) if cat is not None else "",
             "evidence_url": ev_labels,
