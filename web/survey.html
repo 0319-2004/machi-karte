@@ -141,6 +141,29 @@
     .photo-del { border:none; background:none; color:var(--sub); font-size:13px; text-decoration:underline; }
     .photo-note { margin:6px 0 0; font-size:12px; line-height:1.5; color:var(--sub); }
     .photo-note.alert { color:#c62828; font-weight:600; }
+    /* 音声で入力（試験的） */
+    .note-tools { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+    #voice-btn { border:1px solid var(--accent); color:var(--accent); background:#fff;
+      border-radius:18px; padding:7px 13px; font-size:13px; font-weight:700; }
+    #voice-btn.rec { background:var(--accent); color:#fff; animation:pulse 1.1s infinite; }
+    #voice-btn:disabled { opacity:.55; }
+    @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(230,74,25,.5);} 50%{box-shadow:0 0 0 6px rgba(230,74,25,0);} }
+    .voice-status { font-size:12px; color:var(--sub); }
+    .voice-status.err { color:#c62828; }
+
+    /* 同意モーダル */
+    .modal { position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.45);
+      display:flex; align-items:center; justify-content:center; padding:18px; }
+    .modal-card { background:#fff; border-radius:14px; max-width:400px; width:100%;
+      padding:18px; box-shadow:0 8px 30px rgba(0,0,0,.3); }
+    .modal-card h2 { margin:0 0 10px; font-size:17px; }
+    .modal-card p { margin:0 0 10px; font-size:13.5px; line-height:1.6; }
+    .modal-card .modal-note { color:var(--sub); font-size:12.5px; }
+    .modal-actions { display:flex; gap:8px; margin-top:6px; }
+    .modal-actions button { flex:1; border-radius:9px; padding:12px; font-size:15px; font-weight:700; }
+    .m-ghost { border:1px solid var(--line); background:#fff; color:var(--sub); }
+    .m-primary { border:none; background:var(--accent); color:#fff; }
+
     .saved-flag { font-size:12px; color:var(--ok); } .err { font-size:12px; color:#c62828; }
     .nav { display:flex; gap:8px; padding:8px var(--pad); border-top:1px solid var(--line); background:var(--bg); }
     .nav .side { flex:none; width:52px; border:1px solid var(--line); background:#fff;
@@ -238,6 +261,10 @@
       </div>
       <div class="field">
         <label>メモ（任意）</label>
+        <div class="note-tools hidden" id="voice-tools">
+          <button type="button" id="voice-btn">🎤 音声で入力</button>
+          <span class="voice-status" id="voice-status"></span>
+        </div>
         <textarea id="f-note" placeholder="気づいたこと"></textarea>
       </div>
       <div><span class="saved-flag hidden" id="saved-flag">✓ 入力を端末に保存済み</span>
@@ -250,6 +277,20 @@
     </div>
     <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
       target="_blank" rel="noopener">国土地理院（地理院タイル）</a></div>
+  </div>
+
+  <!-- 音声入力の同意（初回だけ・試験的） -->
+  <div id="voice-consent" class="modal hidden">
+    <div class="modal-card">
+      <h2>音声で入力（試験的）</h2>
+      <p>話した内容は<b>ブラウザの提供元（Google / Apple）のサーバーで文字に変換</b>されます。
+         まちカルテは<b>音声を保存せず</b>、変換後の<b>文字だけ</b>を扱います。</p>
+      <p class="modal-note">了解した方だけお使いください。使わなくても手入力で調査できます。</p>
+      <div class="modal-actions">
+        <button type="button" id="voice-cancel" class="m-ghost">やめる</button>
+        <button type="button" id="voice-ok" class="m-primary">了解して使う</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>

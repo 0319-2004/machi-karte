@@ -119,6 +119,26 @@ def usage_codes() -> list[dict]:
     return load_usage_codes()
 
 
+class VoiceBody(BaseModel):
+    text: str                         # 端末の音声認識が返した「認識後テキスト」だけ
+
+
+@app.post("/api/voice_parse")
+def voice_parse(body: VoiceBody) -> dict:
+    """音声入力（試験的）：認識後テキストを Claude で用途・階数・特徴に振り分ける。
+
+    受け取るのは認識後の **テキストだけ**（音声は扱わない・保存しない）。読み取れない
+    項目は null を返す（推測で埋めない）。入力ハッシュでキャッシュしログに残す。
+    API 未設定など失敗時は 503 を返し、UI 側は手入力にそのまま戻れる。
+    """
+    from .voice import parse_voice
+
+    try:
+        return parse_voice(body.text, load_usage_codes())
+    except Exception as e:  # noqa: BLE001 UI は手入力へフォールバックする
+        raise HTTPException(status_code=503, detail=f"音声の振り分けに失敗: {e}")
+
+
 # --- 優先度順リスト（高さ→新規→面積→画像） --------------------------------
 
 @app.get("/api/targets")

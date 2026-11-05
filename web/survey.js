@@ -517,6 +517,8 @@ function fillUsageOptions(code) {
 }
 
 async function loadBuilding(i) {
+  stopVoice(true);                 // 棟を移動したら音声は止める（振り分けない）
+  vStatus("");
   idx = i;
   const id = planOrder[idx];
   document.getElementById("survey-bid").textContent = id;
@@ -652,6 +654,151 @@ document.getElementById("nav-save").addEventListener("click", async () => {
 });
 document.getElementById("nav-prev").addEventListener("click", () => { if (idx > 0) loadBuilding(idx - 1); });
 document.getElementById("nav-next").addEventListener("click", () => { if (idx < planOrder.length - 1) loadBuilding(idx + 1); });
+
+// --- 音声で入力（試験的） ---------------------------------------------------
+// Web Speech API（SpeechRecognition）。音声はブラウザ提供元（Google/Apple）の
+// サーバーで文字に変換される＝端末内処理ではない。初回に一度だけ同意を取り、
+// 音声は保存せず認識後テキストだけを扱う。非対応・拒否・失敗でも手入力は壊さない。
+const VLS = { consent: "mk.survey.voiceConsent" };
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceSupported = !!SR && window.isSecureContext;
+
+let recog = null;            // SpeechRecognition インスタンス（使い回す）
+let voiceActive = false;     // 認識中
+let voiceStopping = false;   // 停止ボタン押下（onend で振り分けへ）
+let voiceSilent = false;     // 棟移動で止めた（振り分けず、メモも触らない）
+let voiceBase = "";          // 音声開始前のメモ（手入力を消さないため）
+let voiceFinal = "";         // 確定した認識テキストの蓄積（再開をまたいで保持）
+
+function vStatus(msg, isErr) {
+  const el = document.getElementById("voice-status");
+  el.textContent = msg || "";
+  el.classList.toggle("err", !!isErr);
+}
+function vBtn(rec) {
+  const b = document.getElementById("voice-btn");
+  b.classList.toggle("rec", rec);
+  b.textContent = rec ? "■ 停止" : "🎤 音声で入力";
+}
+function applyTranscript(interim) {
+  // メモ欄 = 開始前メモ + 認識テキスト（確定 + 暫定）。手入力は保持。
+  const spoken = (voiceFinal + (interim || "")).trim();
+  const sep = voiceBase && spoken ? "\n" : "";
+  document.getElementById("f-note").value = voiceBase + sep + spoken;
+}
+
+function startVoice() {
+  if (!voiceSupported || voiceActive) return;
+  recog = new SR();
+  recog.lang = "ja-JP";
+  recog.continuous = true;
+  recog.interimResults = true;
+  voiceBase = document.getElementById("f-note").value.trim();
+  voiceFinal = "";
+  voiceStopping = false;
+  voiceSilent = false;
+
+  recog.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) voiceFinal += r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    applyTranscript(interim);
+    vStatus("聞いています…");
+  };
+  recog.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      voiceActive = false; voiceStopping = true;   // 再開しない
+      vStatus("マイクが使えません（手入力は続けられます）", true);
+    } else if (e.error === "no-speech") {
+      vStatus("音声が聞き取れませんでした");
+    } else {
+      vStatus("認識でエラー（手入力は続けられます）", true);
+    }
+  };
+  recog.onend = () => {
+    if (voiceActive && !voiceStopping) {
+      try { recog.start(); return; } catch {}   // iOS 対策：止めるまで自動再開
+    }
+    finishVoice();
+  };
+
+  try {
+    recog.start();
+    voiceActive = true;
+    vBtn(true);
+    vStatus("聞いています…（話し終わったら「停止」）");
+  } catch {
+    voiceActive = false;
+    vStatus("音声を開始できませんでした（手入力をどうぞ）", true);
+  }
+}
+
+function stopVoice(silent) {
+  if (!voiceActive) return;
+  voiceStopping = true;
+  voiceActive = false;
+  voiceSilent = !!silent;        // 棟移動で止めたときは振り分けずメモも触らない
+  try { recog && recog.stop(); } catch {}
+}
+
+async function finishVoice() {
+  voiceActive = false;
+  vBtn(false);
+  if (voiceSilent) { voiceSilent = false; return; }  // 棟移動：メモ・振り分けに触れない
+  applyTranscript("");     // 暫定分を確定表示に
+  saveDraft();             // ここまでの文字は必ず端末に残す
+  const text = voiceFinal.trim();
+  if (!text) { vStatus(""); return; }
+
+  vStatus("内容を振り分け中…");
+  try {
+    const res = await fetch("/api/voice_parse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const d = await res.json();
+    const filled = [];
+    if (d.storeys != null) {
+      document.getElementById("f-storeys").value = d.storeys;
+      filled.push(`階数 ${d.storeys}`);
+    }
+    if (d.usage) {
+      const sel = document.getElementById("f-usage");
+      if ([...sel.options].some((o) => o.value === String(d.usage))) {
+        sel.value = String(d.usage);
+        const lbl = usageCodes.find((u) => String(u.code) === String(d.usage));
+        filled.push(`用途 ${lbl ? lbl.label : d.usage}`);
+      }
+    }
+    saveDraft();
+    vStatus(filled.length
+      ? `${filled.join("・")} を入力しました（ご確認を）`
+      : "読み取れる用途・階数はありませんでした（メモに残しました）");
+  } catch {
+    // 振り分け失敗でもメモは残っている。手入力で続けられる。
+    vStatus("振り分けに失敗。話した内容はメモに残っています", true);
+  }
+}
+
+if (voiceSupported) {
+  document.getElementById("voice-tools").classList.remove("hidden");
+  document.getElementById("voice-btn").addEventListener("click", () => {
+    if (voiceActive) { stopVoice(false); return; }
+    if (lsGet(VLS.consent, false)) startVoice();
+    else document.getElementById("voice-consent").classList.remove("hidden");
+  });
+  document.getElementById("voice-ok").addEventListener("click", () => {
+    lsSet(VLS.consent, true);
+    document.getElementById("voice-consent").classList.add("hidden");
+    startVoice();
+  });
+  document.getElementById("voice-cancel").addEventListener("click", () =>
+    document.getElementById("voice-consent").classList.add("hidden"));
+}
 
 // --- 起動 -------------------------------------------------------------------
 loadAll();
