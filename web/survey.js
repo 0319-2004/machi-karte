@@ -277,50 +277,97 @@ document.getElementById("plan-back").addEventListener("click", () => {
   setTimeout(() => pickMap && pickMap.resize(), 50);
 });
 
-// --- 2. 調査プラン ----------------------------------------------------------
-function orderedSelected() {
-  const ids = selected.filter((id) => targetsById[id]);
-  if (mode === "near" && userPos) {
-    return ids.slice().sort((a, b) =>
-      distM(userPos, targetsById[a]) - distM(userPos, targetsById[b]));
-  }
-  // 優先度順：targets（優先度順）の並びに合わせる
-  const rank = {}; targets.forEach((t, i) => rank[t.id] = i);
-  return ids.slice().sort((a, b) => (rank[a] ?? 1e9) - (rank[b] ?? 1e9));
+// --- 2. 調査プラン（距離から訪問順を提案。経路の線は引かない） --------------
+// 近似TSP（最近傍 → 2-opt）。経路案内ではなく「回る順番」の提案に用いる。
+function pathLength(start, pts) {
+  let d = pts.length ? distM(start, pts[0]) : 0;
+  for (let i = 0; i < pts.length - 1; i++) d += distM(pts[i], pts[i + 1]);
+  return d;
 }
-
-// 半径200m でグループ化（先頭＝アンカー、以降は近いもの順の鎖）
-function groupByProximity(ids) {
-  const rest = ids.slice(); const groups = [];
-  while (rest.length) {
-    const anchor = rest.shift();
-    const grp = [anchor];
-    for (let i = rest.length - 1; i >= 0; i--) {
-      if (distM(targetsById[anchor], targetsById[rest[i]]) <= GROUP_RADIUS_M)
-        grp.push(rest.splice(i, 1)[0]);
-    }
-    groups.push(nearestChain(grp));
-  }
-  return groups;
-}
-function nearestChain(ids) {
-  if (ids.length <= 2) return ids;
-  const out = [ids[0]]; const pool = ids.slice(1);
+function nearestNeighbor(start, pts) {
+  const pool = pts.slice(), out = []; let cur = start;
   while (pool.length) {
-    const last = targetsById[out[out.length - 1]];
     let bi = 0, bd = Infinity;
-    pool.forEach((id, i) => { const d = distM(last, targetsById[id]); if (d < bd) { bd = d; bi = i; } });
-    out.push(pool.splice(bi, 1)[0]);
+    pool.forEach((p, i) => { const d = distM(cur, p); if (d < bd) { bd = d; bi = i; } });
+    cur = pool.splice(bi, 1)[0]; out.push(cur);
   }
   return out;
 }
+function twoOpt(start, pts) {
+  if (pts.length < 4) return pts;
+  let best = pts.slice(), improved = true, guard = 0;
+  while (improved && guard++ < 40) {
+    improved = false;
+    for (let i = 0; i < best.length - 1; i++) {
+      for (let k = i + 1; k < best.length; k++) {
+        const cand = best.slice(0, i).concat(best.slice(i, k + 1).reverse(), best.slice(k + 1));
+        if (pathLength(start, cand) + 1e-6 < pathLength(start, best)) { best = cand; improved = true; }
+      }
+    }
+  }
+  return best;
+}
+function optimizePath(start, pts) { return twoOpt(start, nearestNeighbor(start, pts)); }
+
+// 半径200m のグループ（membership のみ。順番は後で最適化する）
+function groupMembership(ids) {
+  const rest = ids.slice(), groups = [];
+  while (rest.length) {
+    const anchor = rest.shift(); const grp = [anchor];
+    for (let i = rest.length - 1; i >= 0; i--)
+      if (distM(targetsById[anchor], targetsById[rest[i]]) <= GROUP_RADIUS_M)
+        grp.push(rest.splice(i, 1)[0]);
+    groups.push(grp);
+  }
+  return groups;
+}
+function centroid(ids) {
+  let lon = 0, lat = 0, n = 0;
+  ids.forEach((id) => { const t = targetsById[id]; if (t) { lon += t.lon; lat += t.lat; n++; } });
+  return { lon: lon / n, lat: lat / n };
+}
 
 function buildPlan() {
-  const ids = orderedSelected();
-  planGroups = groupByProximity(ids);
+  const ids = selected.filter((id) => targetsById[id]);
+  if (!ids.length) { planGroups = []; planOrder = []; renderPlanMap(); renderPlanGroups(); updatePlanSummary(0); return; }
+
+  const rank = {}; targets.forEach((t, i) => rank[t.id] = i);
+  const byPriority = ids.slice().sort((a, b) => rank[a] - rank[b]);
+
+  // 起点：近い順＝現在地 / それ以外＝優先度1位の棟
+  const start = (mode === "near" && userPos)
+    ? { lon: userPos.lon, lat: userPos.lat }
+    : { lon: targetsById[byPriority[0]].lon, lat: targetsById[byPriority[0]].lat };
+
+  // 200m グループを作り、グループ順を最適化（重心で NN+2-opt、起点から）
+  const groups = groupMembership(byPriority);
+  const gpts = groups.map((g) => ({ members: g, ...centroid(g) }));
+  const gorder = optimizePath(start, gpts);
+
+  // 各グループ内も最適化（入口＝直前グループの出口、最初は起点）
+  let entry = start; planGroups = [];
+  for (const gp of gorder) {
+    const pts = gp.members.map((id) => ({ id, lon: targetsById[id].lon, lat: targetsById[id].lat }));
+    const ord = optimizePath(entry, pts);
+    planGroups.push(ord.map((p) => p.id));
+    entry = ord[ord.length - 1];
+  }
   planOrder = planGroups.flat();
-  renderPlanMap();
-  renderPlanGroups();
+
+  // 総移動距離（起点→各棟の直線距離の合計）
+  const seq = [start, ...planOrder.map((id) => targetsById[id])];
+  let total = 0; for (let i = 0; i < seq.length - 1; i++) total += distM(seq[i], seq[i + 1]);
+
+  renderPlanMap(); renderPlanGroups(); updatePlanSummary(total);
+}
+
+function updatePlanSummary(total) {
+  const el = document.getElementById("plan-summary");
+  const dtxt = total < 1000 ? `約${Math.round(total / 10) * 10}m` : `約${(total / 1000).toFixed(1)}km`;
+  const from = (mode === "near" && userPos) ? "現在地" : "優先度1位の棟";
+  el.textContent = planOrder.length
+    ? `この順で回ると、移動距離は ${from}起点で ${dtxt}（直線距離の合計／${planOrder.length}棟）`
+    : "棟が選ばれていません";
 }
 
 function initPlanMap() {

@@ -89,6 +89,8 @@
     .plan-modes #geo-msg { font-size:11px; color:#c62828; }
     #plan-map { position:absolute; inset:0; }
     .plan-mapwrap { position:relative; flex:0 0 32vh; min-height:150px; }
+    .plan-summary { padding:7px var(--pad); font-size:12.5px; color:#37474f;
+      background:#fff8e1; border-bottom:1px solid var(--line); line-height:1.4; }
     #plan-groups { flex:1; overflow-y:auto; padding:6px var(--pad) 14px; }
     .group { margin-top:10px; }
     .group-head { font-size:13px; font-weight:700; color:#37474f; padding:4px 0;
@@ -187,6 +189,7 @@
       <span id="geo-msg"></span>
     </div>
     <div class="plan-mapwrap"><div id="plan-map"></div></div>
+    <div id="plan-summary" class="plan-summary"></div>
     <div id="plan-groups"></div>
     <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
       target="_blank" rel="noopener">国土地理院（地理院タイル）</a>／経路は表示しません</div>
