@@ -8,50 +8,117 @@
         href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <style>
     :root { --bg:#fff; --ink:#263238; --sub:#607d8b; --line:#e0e0e0;
-            --accent:#e64a19; --ok:#2e7d32; --warn:#8e24aa; --pad:10px; }
+            --accent:#e64a19; --ok:#2e7d32; --sel:#ffb300; --warn:#8e24aa; --pad:10px; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin:0; height:100%; }
     body { font-family: system-ui, "Hiragino Sans", sans-serif; color:var(--ink);
            background:#eceff1; overscroll-behavior:none; }
-    button { font:inherit; }
+    button { font:inherit; cursor:pointer; }
     .hidden { display:none !important; }
 
-    /* 画面はビューポートに収める（スマホ縦） */
-    #view-pick, #view-survey { display:flex; flex-direction:column;
-      height:100dvh; max-width:480px; margin:0 auto; background:var(--bg); }
+    .view { display:flex; flex-direction:column; height:100dvh; max-width:480px;
+            margin:0 auto; background:var(--bg); position:relative; }
 
-    /* ヘッダ */
     .bar { display:flex; align-items:center; gap:8px; padding:10px var(--pad);
-           border-bottom:1px solid var(--line); background:var(--bg); }
+           border-bottom:1px solid var(--line); background:var(--bg); z-index:3; }
     .bar h1 { font-size:16px; margin:0; flex:1; }
-    .bar .back { border:none; background:none; font-size:20px; color:var(--sub);
-                 padding:4px 6px; cursor:pointer; }
-    .bar .prog { font-size:13px; color:var(--sub); font-variant-numeric:tabular-nums; }
+    .bar .back { border:none; background:none; font-size:20px; color:var(--sub); padding:4px 6px; }
+    .bar .ghost { border:1px solid var(--line); background:#fff; border-radius:8px;
+                  padding:6px 10px; font-size:13px; color:var(--sub); }
+    .bar .ghost.on { background:var(--accent); color:#fff; border-color:var(--accent); }
 
-    /* 棟を選ぶ画面 */
-    .op-row { display:flex; gap:8px; padding:8px var(--pad); border-bottom:1px solid var(--line); }
-    .op-row input { flex:1; padding:8px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
-    #pick-list { flex:1; overflow-y:auto; margin:0; padding:0; list-style:none; }
+    /* --- 選択（地図が主役） --- */
+    .mapwrap { position:relative; flex:1; min-height:0; }
+    #pick-map, #plan-map { position:absolute; inset:0; }
+    .pick-tools { position:absolute; top:8px; left:8px; right:8px; z-index:4;
+      display:flex; gap:8px; align-items:center; pointer-events:none; }
+    .pick-tools button { pointer-events:auto; border:none; border-radius:18px; padding:8px 13px;
+      font-size:13px; font-weight:700; background:#fff; color:var(--ink);
+      box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .pick-tools #box-toggle.on { background:var(--warn); color:#fff; }
+    .pick-tools #shown-count { pointer-events:none; margin-left:auto; font-size:12px;
+      background:rgba(255,255,255,.9); padding:4px 8px; border-radius:10px; color:var(--sub); }
+    #box-rect { position:absolute; z-index:5; border:2px solid var(--warn);
+      background:rgba(142,36,170,.15); pointer-events:none; display:none; }
+
+    /* タップした棟の小情報 */
+    #pick-info { position:absolute; left:8px; right:8px; bottom:8px; z-index:4;
+      background:rgba(255,255,255,.97); border-radius:10px; padding:9px 11px;
+      box-shadow:0 2px 10px rgba(0,0,0,.2); font-size:13px; }
+    #pick-info .pi-id { font-weight:700; }
+    #pick-info .pi-meta { color:var(--sub); font-size:12px; margin-top:2px; }
+    #pick-info .pi-guide { margin-top:5px; font-size:12px; background:#f3e5f5; color:#4a148c;
+      border-radius:7px; padding:6px 8px; line-height:1.4; }
+    #pick-info .pi-toggle { margin-top:7px; width:100%; border:none; border-radius:8px;
+      padding:9px; font-weight:700; color:#fff; background:var(--accent); }
+    #pick-info .pi-toggle.on { background:var(--sub); }
+
+    /* リストからの選択（地図が重い端末向け） */
+    #pick-list { position:absolute; inset:0; z-index:6; background:#fff; margin:0; padding:0;
+      list-style:none; overflow-y:auto; }
     #pick-list li { display:flex; align-items:center; gap:10px; padding:11px var(--pad);
       border-bottom:1px solid #f0f0f0; }
-    #pick-list li.on { background:#fff3e0; }
-    #pick-list input[type=checkbox] { width:22px; height:22px; flex:none; accent-color:var(--accent); }
+    #pick-list li.on { background:#fff8e1; }
+    #pick-list input { width:22px; height:22px; flex:none; accent-color:var(--accent); }
     #pick-list .bid { font-weight:600; font-size:14px; }
     #pick-list .meta { font-size:12px; color:var(--sub); }
-    #pick-list .tag { font-size:10px; padding:1px 6px; border-radius:10px; margin-left:6px;
-      background:#ffccbc; color:#bf360c; }
-    #pick-list .check { margin-left:auto; color:var(--ok); font-weight:700; }
-    .foot { padding:10px var(--pad); border-top:1px solid var(--line); background:var(--bg); }
-    .foot button { width:100%; padding:14px; border:none; border-radius:10px;
-      background:var(--accent); color:#fff; font-size:16px; font-weight:600; }
-    .foot button:disabled { background:#cfd8dc; }
 
-    /* 調査画面：地図＋入力を1画面に収める */
-    #mini-map { height:30vh; min-height:150px; flex:none; background:#dde; }
+    /* 下部：選択中 N棟 */
+    .selbar { border-top:1px solid var(--line); background:var(--bg); z-index:3; }
+    .selbar-head { display:flex; align-items:center; justify-content:space-between;
+      padding:9px var(--pad); font-size:14px; }
+    .selbar-head b { color:var(--accent); font-size:16px; }
+    #sel-list { max-height:30vh; overflow-y:auto; margin:0; padding:0; list-style:none;
+      border-top:1px solid #f0f0f0; }
+    #sel-list li { display:flex; align-items:center; gap:8px; padding:8px var(--pad);
+      border-bottom:1px solid #f5f5f5; font-size:13px; }
+    #sel-list .rm { margin-left:auto; border:none; background:#eceff1; color:#c62828;
+      border-radius:7px; padding:5px 10px; font-size:12px; }
+    .selbar-foot { display:flex; gap:8px; padding:8px var(--pad); align-items:center; }
+    .selbar-foot input { flex:1; padding:9px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+    .selbar-foot button { flex:0 0 auto; border:none; border-radius:9px; padding:12px 16px;
+      background:var(--accent); color:#fff; font-weight:700; font-size:15px; }
+    .selbar-foot button:disabled { background:#cfd8dc; }
+
+    /* --- 調査プラン --- */
+    .plan-modes { display:flex; gap:8px; align-items:center; padding:8px var(--pad);
+      border-bottom:1px solid var(--line); }
+    .plan-modes button { border:1px solid var(--line); background:#fff; border-radius:18px;
+      padding:7px 14px; font-size:13px; font-weight:700; color:var(--sub); }
+    .plan-modes button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .plan-modes #geo-msg { font-size:11px; color:#c62828; }
+    #plan-map { position:absolute; inset:0; }
+    .plan-mapwrap { position:relative; flex:0 0 32vh; min-height:150px; }
+    #plan-groups { flex:1; overflow-y:auto; padding:6px var(--pad) 14px; }
+    .group { margin-top:10px; }
+    .group-head { font-size:13px; font-weight:700; color:#37474f; padding:4px 0;
+      border-bottom:2px solid var(--line); display:flex; align-items:center; gap:8px; }
+    .group-head .gdot { width:12px; height:12px; border-radius:50%; flex:none; }
+    .grp-item { display:flex; align-items:center; gap:10px; padding:11px 4px;
+      border-bottom:1px solid #f2f2f2; }
+    .grp-item .num { flex:none; width:26px; height:26px; border-radius:50%; color:#fff;
+      font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+    .grp-item .gi-main { flex:1; min-width:0; }
+    .grp-item .gi-id { font-weight:600; font-size:14px; }
+    .grp-item .gi-meta { font-size:12px; color:var(--sub); }
+    .grp-item .gi-dist { flex:none; font-size:12px; color:var(--accent); font-weight:700; }
+    .grp-item.done { opacity:.55; }
+    .grp-item .gi-done { color:var(--ok); font-weight:700; font-size:12px; }
+
+    /* 俯瞰地図のピン / 現在地 */
+    .pin { width:24px; height:24px; border-radius:50% 50% 50% 0; transform:rotate(-45deg);
+      box-shadow:0 1px 4px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; }
+    .pin span { transform:rotate(45deg); color:#fff; font-size:11px; font-weight:700; }
+    .me-dot { width:16px; height:16px; border-radius:50%; background:#1565c0;
+      border:3px solid #fff; box-shadow:0 0 0 2px #1565c0; }
+
+    /* --- 入力（既存流用） --- */
+    #mini-map { height:26vh; min-height:130px; flex:none; background:#dde; }
     .survey-body { flex:1; display:flex; flex-direction:column; padding:8px var(--pad);
       gap:7px; overflow-y:auto; }
-    .est { font-size:13px; color:var(--sub); }
-    .est b { color:var(--ink); }
+    .input-group { font-size:12px; color:var(--sub); }
+    .input-group b { color:var(--ink); }
+    .est { font-size:13px; color:var(--sub); } .est b { color:var(--ink); }
     .guide { font-size:12.5px; background:#f3e5f5; color:#4a148c; border-radius:8px;
       padding:7px 9px; line-height:1.4; }
     .guide .lead { font-weight:700; margin-right:6px; }
@@ -60,50 +127,81 @@
     .field select, .field input[type=number], .field textarea {
       width:100%; padding:9px; border:1px solid var(--line); border-radius:8px; font-size:15px; }
     .field textarea { resize:none; height:42px; }
-    .two { display:flex; gap:8px; }
-    .two .field { flex:1; }
+    .two { display:flex; gap:8px; } .two .field { flex:1; }
     .photo-row { display:flex; align-items:center; gap:10px; }
     .photo-btn { flex:none; padding:10px 12px; border:1px solid var(--accent); color:var(--accent);
       background:#fff; border-radius:8px; font-size:14px; }
     .photo-row input[type=file] { display:none; }
     #photo-thumb { height:46px; border-radius:6px; display:none; }
     .photo-del { border:none; background:none; color:var(--sub); font-size:13px; text-decoration:underline; }
-    .saved-flag { font-size:12px; color:var(--ok); }
-    .err { font-size:12px; color:#c62828; }
-
-    .nav { display:flex; gap:8px; padding:8px var(--pad); border-top:1px solid var(--line);
-      background:var(--bg); }
+    .saved-flag { font-size:12px; color:var(--ok); } .err { font-size:12px; color:#c62828; }
+    .nav { display:flex; gap:8px; padding:8px var(--pad); border-top:1px solid var(--line); background:var(--bg); }
     .nav .side { flex:none; width:52px; border:1px solid var(--line); background:#fff;
       border-radius:10px; font-size:18px; color:var(--sub); }
     .nav .save { flex:1; border:none; border-radius:10px; background:var(--ok); color:#fff;
-      font-size:16px; font-weight:600; }
-    .nav .save.done { background:#81c784; }
+      font-size:16px; font-weight:700; } .nav .save.done { background:#81c784; }
     .attrib { font-size:10px; color:var(--sub); text-align:center; padding:2px; }
     .attrib a { color:var(--sub); }
+    .prog { font-size:13px; color:var(--sub); font-variant-numeric:tabular-nums; }
   </style>
 </head>
 <body>
-  <!-- 棟を選ぶ -->
-  <div id="view-pick">
-    <div class="bar"><h1>現地調査｜今日回る棟を選ぶ</h1></div>
-    <div class="op-row">
-      <input id="operator" type="text" placeholder="調査担当者（任意）" autocomplete="name" />
+  <!-- 1. 選択（地図が主役） -->
+  <div id="view-pick" class="view">
+    <div class="bar">
+      <h1>現地調査｜地図で選ぶ</h1>
+      <button id="toggle-list" class="ghost" title="リストから選ぶ（地図が重い端末向け）">リスト</button>
     </div>
-    <ul id="pick-list"></ul>
-    <div class="foot">
-      <button id="start-btn" disabled>選んだ棟を調査（0）</button>
+    <div class="mapwrap">
+      <div id="pick-map"></div>
+      <div id="box-rect"></div>
+      <div class="pick-tools">
+        <button id="box-toggle" title="指でドラッグした範囲の棟をまとめて選ぶ">範囲で選択</button>
+        <button id="more-btn">もっと表示</button>
+        <span id="shown-count"></span>
+      </div>
+      <div id="pick-info" class="hidden"></div>
+      <ul id="pick-list" class="hidden"></ul>
+    </div>
+    <div class="selbar">
+      <div class="selbar-head" id="sel-head" role="button">
+        <span>選択中 <b id="sel-n">0</b>棟（タップで一覧）</span><span id="sel-caret">▸</span>
+      </div>
+      <ul id="sel-list" class="hidden"></ul>
+      <div class="selbar-foot">
+        <input id="operator" type="text" placeholder="調査担当者（任意）" autocomplete="name" />
+        <button id="start-btn" disabled>調査を開始</button>
+      </div>
     </div>
   </div>
 
-  <!-- 1棟ずつ調査 -->
-  <div id="view-survey" class="hidden">
+  <!-- 2. 調査プラン（近い順/優先度順・グループ・俯瞰地図） -->
+  <div id="view-plan" class="view hidden">
     <div class="bar">
-      <button class="back" id="survey-back" title="棟の選択に戻る">←</button>
+      <button class="back" id="plan-back" title="選択に戻る">←</button>
+      <h1>調査プラン</h1>
+    </div>
+    <div class="plan-modes">
+      <button id="mode-priority" class="on">優先度順</button>
+      <button id="mode-near">近い順</button>
+      <span id="geo-msg"></span>
+    </div>
+    <div class="plan-mapwrap"><div id="plan-map"></div></div>
+    <div id="plan-groups"></div>
+    <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
+      target="_blank" rel="noopener">国土地理院（地理院タイル）</a>／経路は表示しません</div>
+  </div>
+
+  <!-- 3. 入力（既存流用＋グループ・距離） -->
+  <div id="view-input" class="view hidden">
+    <div class="bar">
+      <button class="back" id="input-back" title="プランに戻る">←</button>
       <h1 id="survey-bid">—</h1>
       <span class="prog" id="survey-prog"></span>
     </div>
     <div id="mini-map"></div>
     <div class="survey-body">
+      <div class="input-group" id="input-group"></div>
       <div class="est" id="survey-est">推定を読み込み中…</div>
       <div class="guide hidden" id="survey-guide"></div>
       <div class="field">

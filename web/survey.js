@@ -1,37 +1,73 @@
 "use strict";
 
 // まちカルテ 現地調査（スマホのブラウザ前提）。
-// - 優先度順リストから今日回る棟を選び、現地で1棟ずつ入力する。
-// - 位置情報（Geolocation）は使わない（許可ダイアログで現地作業が止まるのを避ける）。
-// - 入力は都度 localStorage に保存し、通信が切れても消えないようにする。
-// - 送信は POST /api/survey（写真は端末側で縮小して data URL で送る）。
+// 1) 地図で調査対象をタップ/範囲選択 → 2) 近い順/優先度順でグループ化した調査プラン
+// → 3) 1棟ずつ入力（既存流用）。
+// 位置情報は「近い順」を押したときだけ求め、表示と並び替えにだけ使う（サーバーに送らない）。
+// 位置が取れなくても全機能が使える。入力の下書きは localStorage に保存する。
 
 const LS = {
   selected: "mk.survey.selected",
   operator: "mk.survey.operator",
   draft: (id) => `mk.survey.draft.${id}`,
 };
-const PHOTO_MAX = 1280;   // 長辺の上限px（localStorage とアップロードを軽くする）
+const PHOTO_MAX = 1280;
+const GSI = {
+  version: 8,
+  sources: { gsi: { type: "raster",
+    tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
+    tileSize: 256, attribution: "国土地理院（地理院タイル）" } },
+  layers: [{ id: "gsi", type: "raster", source: "gsi" }],
+};
+const COLOR_TGT = "#e64a19", COLOR_SEL = "#2e7d32";
+const GROUP_COLORS = ["#1565c0", "#6a1b9a", "#ef6c00", "#00838f", "#c2185b",
+                      "#558b0f", "#4527a0", "#00695c"];
+const GROUP_RADIUS_M = 200;
 
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 let usageCodes = [];
-let targets = [];
-let guidanceById = {};       // building_id -> 現地で確認することの文章
+let targets = [];                 // 全調査対象（優先度順、coords つき）
+let targetsById = {};
+let guidanceById = {};
 let selected = lsGet(LS.selected, []);
-let order = [];              // 調査対象の building_id 配列（selected の並び）
-let idx = 0;                 // 調査中の位置
-let map = null, marker = null;
+let displayLimit = 100;           // 地図に出す上位N（「もっと表示」で増やす）
+let targetTotal = 0;
+
+let pickMap = null, planMap = null;
+let boxMode = false;
+
+// プラン/入力
+let mode = "priority";            // priority | near
+let userPos = null;               // {lon,lat} | null（近い順を押したときだけ）
+let planGroups = [];              // [[id,...], ...]
+let planOrder = [];               // グループを平らにした訪問順
+let idx = 0;
+
+// --- 距離 -------------------------------------------------------------------
+function distM(a, b) {
+  const R = 6378137, rad = Math.PI / 180;
+  const dx = (b.lon - a.lon) * rad * Math.cos((a.lat + b.lat) / 2 * rad) * R;
+  const dy = (b.lat - a.lat) * rad * R;
+  return Math.hypot(dx, dy);
+}
+function fmtDist(m) {
+  if (m == null) return "";
+  return m < 1000 ? `約${Math.round(m / 10) * 10}m` : `約${(m / 1000).toFixed(1)}km`;
+}
 
 // --- データ読み込み ---------------------------------------------------------
-
 async function loadAll() {
+  const stats = await fetch("/api/stats").then((r) => r.json()).catch(() => null);
+  targetTotal = stats ? stats.target : 0;
+  // 対象の座標は /api/targets からしか取れないので、全件を一度だけ読む（点なので軽い）
   [usageCodes, targets] = await Promise.all([
     fetch("/api/usage_codes").then((r) => r.json()),
-    fetch("/api/targets?limit=100").then((r) => r.json()),
+    fetch("/api/targets?limit=5000").then((r) => r.json()),
   ]);
-  // 判断不能の「現地で確認すること」を building_id に展開（最初に当たった区分を使う）
+  if (!targetTotal) targetTotal = targets.length;
+  for (const t of targets) targetsById[t.id] = t;
   try {
     const un = await fetch("/api/unresolved").then((r) => r.json());
     for (const g of un.groups || []) {
@@ -40,117 +76,405 @@ async function loadAll() {
     }
   } catch {}
   document.getElementById("operator").value = lsGet(LS.operator, "") || "";
-  renderPick();
+  initPickMap();
+  renderPickList();
+  updateSelbar();
 }
 
-// --- 棟を選ぶ画面 -----------------------------------------------------------
+// --- 1. 選択（地図が主役） --------------------------------------------------
+function shownTargets() { return targets.slice(0, displayLimit); }
 
-function renderPick() {
+function pointFC(list) {
+  return { type: "FeatureCollection", features: list.map((t) => ({
+    type: "Feature", id: t.id,
+    properties: { id: t.id },
+    geometry: { type: "Point", coordinates: [t.lon, t.lat] },
+  })) };
+}
+
+function initPickMap() {
+  pickMap = new maplibregl.Map({
+    container: "pick-map", style: GSI, center: [139.6917, 35.6896], zoom: 14,
+    attributionControl: { compact: true },
+  });
+  pickMap.on("load", () => {
+    pickMap.addSource("tg", { type: "geojson", data: pointFC(shownTargets()) });
+    // 選択は feature-state ではなく paint 式で塗る（建物IDは数値化できず feature-state 不可のため）。
+    // タップ判定を確保するため半径は大きめ（小さい建物でも指で押せる）。
+    pickMap.addLayer({ id: "tg-dot", type: "circle", source: "tg", paint: {
+      "circle-radius": selRadiusExpr(),
+      "circle-color": selColorExpr(),
+      "circle-stroke-width": 1.6, "circle-stroke-color": "#fff", "circle-opacity": 0.9,
+    } });
+    pickMap.on("click", "tg-dot", (e) => {
+      const id = e.features[0].properties.id;
+      toggleSelect(id); showPickInfo(id);
+    });
+    pickMap.on("mouseenter", "tg-dot", () => pickMap.getCanvas().style.cursor = "pointer");
+    pickMap.on("mouseleave", "tg-dot", () => pickMap.getCanvas().style.cursor = "");
+    updateShownCount();
+  });
+  setupBoxSelect();
+}
+
+function selColorExpr() {
+  return ["case", ["in", ["get", "id"], ["literal", selected]], COLOR_SEL, COLOR_TGT];
+}
+function selRadiusExpr() {
+  return ["case", ["in", ["get", "id"], ["literal", selected]], 11, 8];
+}
+function paintSel() {
+  if (!pickMap || !pickMap.getLayer("tg-dot")) return;
+  pickMap.setPaintProperty("tg-dot", "circle-color", selColorExpr());
+  pickMap.setPaintProperty("tg-dot", "circle-radius", selRadiusExpr());
+}
+
+function refreshPickSource() {
+  const src = pickMap && pickMap.getSource("tg");
+  if (src) { src.setData(pointFC(shownTargets())); paintSel(); }
+  updateShownCount();
+}
+function updateShownCount() {
+  document.getElementById("shown-count").textContent =
+    `表示 ${Math.min(displayLimit, targets.length)} / ${targetTotal}`;
+  document.getElementById("more-btn").classList.toggle("hidden", displayLimit >= targets.length);
+}
+
+function toggleSelect(id) {
+  const i = selected.indexOf(id);
+  if (i >= 0) selected.splice(i, 1); else selected.push(id);
+  lsSet(LS.selected, selected);
+  paintSel();
+  updateSelbar(); renderPickList();
+}
+
+function showPickInfo(id) {
+  const t = targetsById[id]; if (!t) return;
+  const h = t.height_m != null ? `${t.height_m.toFixed(0)}m` : "高さ不明";
+  const on = selected.includes(id);
+  const guide = guidanceById[id]
+    ? `<div class="pi-guide">現地で確認：${guidanceById[id]}</div>` : "";
+  const el = document.getElementById("pick-info");
+  el.innerHTML =
+    `<div class="pi-id">${id}</div>` +
+    `<div class="pi-meta">${h}・推定用途 ${t.usage_label || "不明"}${t.is_new ? "・新規" : ""}</div>` +
+    guide +
+    `<button class="pi-toggle ${on ? "on" : ""}">${on ? "選択を解除" : "この棟を選ぶ"}</button>`;
+  el.classList.remove("hidden");
+  el.querySelector(".pi-toggle").addEventListener("click", () => { toggleSelect(id); showPickInfo(id); });
+}
+
+// 範囲で選択（指でドラッグ）：ドラッグ中はパンを止め、矩形内の表示中の棟を選ぶ
+function setupBoxSelect() {
+  const wrap = document.querySelector("#view-pick .mapwrap");
+  const rect = document.getElementById("box-rect");
+  let start = null;
+  const pt = (ev) => { const r = wrap.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+
+  document.getElementById("box-toggle").addEventListener("click", (e) => {
+    boxMode = !boxMode;
+    e.currentTarget.classList.toggle("on", boxMode);
+    if (boxMode) pickMap.dragPan.disable(); else pickMap.dragPan.enable();
+  });
+
+  wrap.addEventListener("pointerdown", (ev) => {
+    if (!boxMode) return;
+    ev.preventDefault(); start = pt(ev);
+    rect.style.display = "block";
+    rect.style.left = start.x + "px"; rect.style.top = start.y + "px";
+    rect.style.width = "0px"; rect.style.height = "0px";
+  });
+  wrap.addEventListener("pointermove", (ev) => {
+    if (!boxMode || !start) return;
+    const p = pt(ev);
+    rect.style.left = Math.min(start.x, p.x) + "px";
+    rect.style.top = Math.min(start.y, p.y) + "px";
+    rect.style.width = Math.abs(p.x - start.x) + "px";
+    rect.style.height = Math.abs(p.y - start.y) + "px";
+  });
+  const finish = (ev) => {
+    if (!boxMode || !start) return;
+    const p = pt(ev);
+    const x0 = Math.min(start.x, p.x), x1 = Math.max(start.x, p.x);
+    const y0 = Math.min(start.y, p.y), y1 = Math.max(start.y, p.y);
+    start = null; rect.style.display = "none";
+    if (x1 - x0 < 6 && y1 - y0 < 6) return;   // タップ扱い（誤爆回避）
+    let added = 0;
+    for (const t of shownTargets()) {
+      const s = pickMap.project([t.lon, t.lat]);
+      if (s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1 && !selected.includes(t.id)) {
+        selected.push(t.id); added++;
+      }
+    }
+    if (added) { lsSet(LS.selected, selected); paintSel(); updateSelbar(); renderPickList(); }
+  };
+  wrap.addEventListener("pointerup", finish);
+  wrap.addEventListener("pointercancel", () => { start = null; rect.style.display = "none"; });
+}
+
+// リストからの選択（地図が重い端末向け）
+function renderPickList() {
   const ul = document.getElementById("pick-list");
   ul.innerHTML = "";
-  for (const t of targets) {
+  for (const t of shownTargets()) {
     const li = document.createElement("li");
     const on = selected.includes(t.id);
     if (on) li.classList.add("on");
     const h = t.height_m != null ? t.height_m.toFixed(0) + "m" : "高さ不明";
-    const draft = lsGet(LS.draft(t.id), null);
-    const doneMark = draft && draft.done ? '<span class="check">✓調査済</span>' : "";
-    const newTag = t.is_new ? '<span class="tag">新規</span>' : "";
     li.innerHTML =
       `<input type="checkbox" ${on ? "checked" : ""} />` +
-      `<div><div class="bid">${t.id}${newTag}</div>` +
-      `<div class="meta">${h}・用途 ${t.usage_label || "不明"}</div></div>${doneMark}`;
-    const cb = li.querySelector("input");
-    cb.addEventListener("change", () => toggleSelect(t.id, cb.checked, li));
+      `<div><div class="bid">${t.id}</div>` +
+      `<div class="meta">${h}・用途 ${t.usage_label || "不明"}${t.is_new ? "・新規" : ""}</div></div>`;
+    li.querySelector("input").addEventListener("change", () => toggleSelect(t.id));
     ul.appendChild(li);
   }
-  updateStartBtn();
 }
+document.getElementById("toggle-list").addEventListener("click", (e) => {
+  const list = document.getElementById("pick-list");
+  const hidden = list.classList.toggle("hidden");
+  e.currentTarget.classList.toggle("on", !hidden);
+});
+document.getElementById("more-btn").addEventListener("click", () => {
+  displayLimit = displayLimit >= 2000 ? targets.length
+    : displayLimit >= 500 ? 2000 : displayLimit >= 100 ? 500 : 100;
+  refreshPickSource(); renderPickList();
+});
 
-function toggleSelect(id, on, li) {
-  if (on && !selected.includes(id)) selected.push(id);
-  if (!on) selected = selected.filter((x) => x !== id);
-  li.classList.toggle("on", on);
-  lsSet(LS.selected, selected);
-  updateStartBtn();
-}
-
-function updateStartBtn() {
+// 下部：選択中 N棟
+function updateSelbar() {
+  document.getElementById("sel-n").textContent = selected.length;
   const btn = document.getElementById("start-btn");
-  btn.textContent = `選んだ棟を調査（${selected.length}）`;
   btn.disabled = selected.length === 0;
+  const ul = document.getElementById("sel-list");
+  ul.innerHTML = "";
+  for (const id of selected) {
+    const t = targetsById[id] || { id };
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${id}</span><button class="rm">外す</button>`;
+    li.querySelector(".rm").addEventListener("click", () => toggleSelect(id));
+    ul.appendChild(li);
+  }
 }
-
+document.getElementById("sel-head").addEventListener("click", () => {
+  const list = document.getElementById("sel-list");
+  const hidden = list.classList.toggle("hidden");
+  document.getElementById("sel-caret").textContent = hidden ? "▸" : "▾";
+});
 document.getElementById("operator").addEventListener("input", (e) =>
   lsSet(LS.operator, e.target.value.trim()));
 
 document.getElementById("start-btn").addEventListener("click", () => {
-  // targets の並び（優先度順）に沿って調査順を決める
-  order = targets.map((t) => t.id).filter((id) => selected.includes(id));
-  if (!order.length) return;
+  if (!selected.length) return;
   document.getElementById("view-pick").classList.add("hidden");
-  document.getElementById("view-survey").classList.remove("hidden");
-  ensureMap();
-  // 未調査の先頭から始める
-  const firstUndone = order.findIndex((id) => !(lsGet(LS.draft(id), {}).done));
-  idx = firstUndone >= 0 ? firstUndone : 0;
-  loadBuilding(idx);
+  document.getElementById("view-plan").classList.remove("hidden");
+  initPlanMap();
+  mode = "priority"; setModeButtons();
+  buildPlan();
 });
-
-document.getElementById("survey-back").addEventListener("click", () => {
-  document.getElementById("view-survey").classList.add("hidden");
+document.getElementById("plan-back").addEventListener("click", () => {
+  document.getElementById("view-plan").classList.add("hidden");
   document.getElementById("view-pick").classList.remove("hidden");
-  renderPick();   // 調査済マークを反映
+  setTimeout(() => pickMap && pickMap.resize(), 50);
 });
 
-// --- 地図（位置の代わり。位置情報は使わない） ------------------------------
+// --- 2. 調査プラン ----------------------------------------------------------
+function orderedSelected() {
+  const ids = selected.filter((id) => targetsById[id]);
+  if (mode === "near" && userPos) {
+    return ids.slice().sort((a, b) =>
+      distM(userPos, targetsById[a]) - distM(userPos, targetsById[b]));
+  }
+  // 優先度順：targets（優先度順）の並びに合わせる
+  const rank = {}; targets.forEach((t, i) => rank[t.id] = i);
+  return ids.slice().sort((a, b) => (rank[a] ?? 1e9) - (rank[b] ?? 1e9));
+}
 
-function ensureMap() {
-  if (map) { map.resize(); return; }
-  const style = {
-    version: 8,
-    sources: {
-      gsi: { type: "raster",
-             tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
-             tileSize: 256,
-             attribution: "国土地理院（地理院タイル）" },
-    },
-    layers: [{ id: "gsi", type: "raster", source: "gsi" }],
-  };
-  map = new maplibregl.Map({
-    container: "mini-map", style, center: [139.6917, 35.6896], zoom: 17,
+// 半径200m でグループ化（先頭＝アンカー、以降は近いもの順の鎖）
+function groupByProximity(ids) {
+  const rest = ids.slice(); const groups = [];
+  while (rest.length) {
+    const anchor = rest.shift();
+    const grp = [anchor];
+    for (let i = rest.length - 1; i >= 0; i--) {
+      if (distM(targetsById[anchor], targetsById[rest[i]]) <= GROUP_RADIUS_M)
+        grp.push(rest.splice(i, 1)[0]);
+    }
+    groups.push(nearestChain(grp));
+  }
+  return groups;
+}
+function nearestChain(ids) {
+  if (ids.length <= 2) return ids;
+  const out = [ids[0]]; const pool = ids.slice(1);
+  while (pool.length) {
+    const last = targetsById[out[out.length - 1]];
+    let bi = 0, bd = Infinity;
+    pool.forEach((id, i) => { const d = distM(last, targetsById[id]); if (d < bd) { bd = d; bi = i; } });
+    out.push(pool.splice(bi, 1)[0]);
+  }
+  return out;
+}
+
+function buildPlan() {
+  const ids = orderedSelected();
+  planGroups = groupByProximity(ids);
+  planOrder = planGroups.flat();
+  renderPlanMap();
+  renderPlanGroups();
+}
+
+function initPlanMap() {
+  if (planMap) { planMap.resize(); return; }
+  planMap = new maplibregl.Map({
+    container: "plan-map", style: GSI, center: [139.6917, 35.6896], zoom: 13,
     attributionControl: false,
   });
-  marker = new maplibregl.Marker({ color: "#e64a19" });
+}
+let planMarkers = [];
+function clearPlanMarkers() { planMarkers.forEach((m) => m.remove()); planMarkers = []; }
+
+function renderPlanMap() {
+  if (!planMap) return;
+  const run = () => {
+    clearPlanMarkers();
+    const bounds = new maplibregl.LngLatBounds();
+    let n = 0;
+    planGroups.forEach((grp, gi) => {
+      const color = GROUP_COLORS[gi % GROUP_COLORS.length];
+      grp.forEach((id) => {
+        const t = targetsById[id]; if (!t) return;
+        n++;
+        const el = document.createElement("div");
+        el.className = "pin"; el.style.background = color;
+        el.innerHTML = `<span>${n}</span>`;
+        planMarkers.push(new maplibregl.Marker({ element: el, anchor: "bottom" })
+          .setLngLat([t.lon, t.lat]).addTo(planMap));
+        bounds.extend([t.lon, t.lat]);
+      });
+    });
+    if (userPos) {
+      const me = document.createElement("div"); me.className = "me-dot";
+      planMarkers.push(new maplibregl.Marker({ element: me })
+        .setLngLat([userPos.lon, userPos.lat]).addTo(planMap));
+      bounds.extend([userPos.lon, userPos.lat]);
+    }
+    if (!bounds.isEmpty()) planMap.fitBounds(bounds, { padding: 46, maxZoom: 16, duration: 600 });
+  };
+  if (planMap.loaded()) run(); else planMap.once("load", run);
 }
 
-function placeMarker(lon, lat) {
-  if (lon == null || lat == null) return;
-  marker.setLngLat([lon, lat]).addTo(map);
-  map.jumpTo({ center: [lon, lat], zoom: 17 });
-  setTimeout(() => map.resize(), 50);
+function renderPlanGroups() {
+  const box = document.getElementById("plan-groups");
+  box.innerHTML = "";
+  let n = 0;
+  planGroups.forEach((grp, gi) => {
+    const color = GROUP_COLORS[gi % GROUP_COLORS.length];
+    const wrap = document.createElement("div"); wrap.className = "group";
+    const head = document.createElement("div"); head.className = "group-head";
+    head.innerHTML = `<span class="gdot" style="background:${color}"></span>` +
+      `グループ${gi + 1}（${grp.length}棟）`;
+    wrap.appendChild(head);
+    grp.forEach((id) => {
+      n++;
+      const t = targetsById[id] || { id };
+      const draft = lsGet(LS.draft(id), {});
+      const h = t.height_m != null ? `${t.height_m.toFixed(0)}m` : "高さ不明";
+      const dist = userPos ? fmtDist(distM(userPos, t)) : "";
+      const item = document.createElement("div");
+      item.className = "grp-item" + (draft.done ? " done" : "");
+      item.innerHTML =
+        `<div class="num" style="background:${color}">${n}</div>` +
+        `<div class="gi-main"><div class="gi-id">${id}</div>` +
+        `<div class="gi-meta">${h}・${t.usage_label || "用途不明"}` +
+        `${draft.done ? ' <span class="gi-done">✓調査済</span>' : ""}</div></div>` +
+        (dist ? `<div class="gi-dist">${dist}</div>` : "");
+      item.addEventListener("click", () => openInput(planOrder.indexOf(id)));
+      wrap.appendChild(item);
+    });
+    box.appendChild(wrap);
+  });
 }
 
-// --- 1棟の調査画面 ----------------------------------------------------------
+function setModeButtons() {
+  document.getElementById("mode-priority").classList.toggle("on", mode === "priority");
+  document.getElementById("mode-near").classList.toggle("on", mode === "near");
+}
+document.getElementById("mode-priority").addEventListener("click", () => {
+  mode = "priority"; setModeButtons();
+  document.getElementById("geo-msg").textContent = "";
+  buildPlan();
+});
+document.getElementById("mode-near").addEventListener("click", () => {
+  const msg = document.getElementById("geo-msg");
+  if (userPos) { mode = "near"; setModeButtons(); buildPlan(); return; }
+  if (!navigator.geolocation) { msg.textContent = "この端末は位置情報に対応していません"; return; }
+  msg.textContent = "位置を取得中…";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userPos = { lon: pos.coords.longitude, lat: pos.coords.latitude };
+      mode = "near"; setModeButtons(); msg.textContent = ""; buildPlan();
+    },
+    () => { msg.textContent = "位置を取得できませんでした（優先度順のままです）"; },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+});
 
-function fillUsageOptions(selectedCode) {
+// --- 3. 入力（既存流用＋グループ/距離） -------------------------------------
+let miniMap = null, miniMarker = null;
+function ensureMiniMap() {
+  if (miniMap) { miniMap.resize(); return; }
+  miniMap = new maplibregl.Map({ container: "mini-map", style: GSI,
+    center: [139.6917, 35.6896], zoom: 17, attributionControl: false });
+  miniMarker = new maplibregl.Marker({ color: COLOR_TGT });
+}
+function placeMini(lon, lat) {
+  if (lon == null) return;
+  miniMarker.setLngLat([lon, lat]).addTo(miniMap);
+  miniMap.jumpTo({ center: [lon, lat], zoom: 17 });
+  setTimeout(() => miniMap.resize(), 50);
+}
+
+function openInput(i) {
+  document.getElementById("view-plan").classList.add("hidden");
+  document.getElementById("view-input").classList.remove("hidden");
+  ensureMiniMap();
+  loadBuilding(i < 0 ? 0 : i);
+}
+document.getElementById("input-back").addEventListener("click", () => {
+  document.getElementById("view-input").classList.add("hidden");
+  document.getElementById("view-plan").classList.remove("hidden");
+  renderPlanGroups();                       // 調査済マークを反映
+  setTimeout(() => planMap && planMap.resize(), 50);
+});
+
+function groupOf(id) {
+  for (let gi = 0; gi < planGroups.length; gi++)
+    if (planGroups[gi].includes(id)) return gi + 1;
+  return null;
+}
+function fillUsageOptions(code) {
   const sel = document.getElementById("f-usage");
   sel.innerHTML = '<option value="">（未選択）</option>' +
     usageCodes.map((u) => `<option value="${u.code}">${u.code}：${u.label}</option>`).join("");
-  sel.value = selectedCode || "";
+  sel.value = code || "";
 }
 
 async function loadBuilding(i) {
   idx = i;
-  const id = order[idx];
+  const id = planOrder[idx];
   document.getElementById("survey-bid").textContent = id;
-  document.getElementById("survey-prog").textContent = `${idx + 1} / ${order.length}`;
+  document.getElementById("survey-prog").textContent = `${idx + 1} / ${planOrder.length}`;
   document.getElementById("survey-err").classList.add("hidden");
 
-  const t = targets.find((x) => x.id === id);
-  placeMarker(t && t.lon, t && t.lat);
+  const t = targetsById[id] || {};
+  placeMini(t.lon, t.lat);
 
-  // 推定値・判断不能ガイドを取りに行く
+  // グループ・距離の表示（入力画面にも足す）
+  const g = groupOf(id);
+  const dist = userPos && t.lon != null ? fmtDist(distM(userPos, t)) : null;
+  document.getElementById("input-group").innerHTML =
+    (g ? `<b>グループ${g}</b>` : "") + (dist ? `・現在地から ${dist}` : "") +
+    (t.height_m != null ? `・高さ ${t.height_m.toFixed(0)}m` : "");
+
   let estUsage = null, estStoreys = null, estText = "推定なし";
   try {
     const d = await fetch(`/api/buildings/${id}`).then((r) => r.json());
@@ -169,7 +493,6 @@ async function loadBuilding(i) {
     guideEl.classList.remove("hidden");
   } else guideEl.classList.add("hidden");
 
-  // 下書き（localStorage）があれば優先、無ければ推定を初期値にする
   const draft = lsGet(LS.draft(id), null);
   fillUsageOptions(draft ? draft.usage : estUsage);
   document.getElementById("f-storeys").value =
@@ -186,114 +509,88 @@ async function loadBuilding(i) {
 }
 
 function readForm() {
-  const id = order[idx];
   const st = document.getElementById("f-storeys").value;
   return {
-    building_id: id,
+    building_id: planOrder[idx],
     usage: document.getElementById("f-usage").value || null,
     storeys: st === "" ? null : Math.max(1, parseInt(st, 10) || 0) || null,
     note: document.getElementById("f-note").value.trim() || null,
     photo: currentPhoto,
   };
 }
-
 function saveDraft() {
-  const id = order[idx];
+  const id = planOrder[idx];
   const prev = lsGet(LS.draft(id), {});
-  const f = readForm();
-  lsSet(LS.draft(id), { ...f, done: prev.done || false });
+  lsSet(LS.draft(id), { ...readForm(), done: prev.done || false });
   document.getElementById("saved-flag").classList.remove("hidden");
 }
-
-// 入力のたびに下書き保存（通信が切れても消えないように）
-for (const elid of ["f-usage", "f-storeys", "f-note"]) {
+for (const elid of ["f-usage", "f-storeys", "f-note"])
   document.getElementById(elid).addEventListener("input", saveDraft);
-}
 
-// --- 写真（カメラ起動 → 端末側で縮小） --------------------------------------
-
-let currentPhoto = null;   // data URL or null
-
+// 写真（カメラ→端末側で縮小）
+let currentPhoto = null;
 function setPhoto(dataUrl) {
   currentPhoto = dataUrl || null;
   const thumb = document.getElementById("photo-thumb");
   const del = document.getElementById("photo-del");
-  if (currentPhoto) { thumb.src = currentPhoto; thumb.style.display = "inline";
-    del.classList.remove("hidden"); }
-  else { thumb.removeAttribute("src"); thumb.style.display = "none";
-    del.classList.add("hidden"); }
+  if (currentPhoto) { thumb.src = currentPhoto; thumb.style.display = "inline"; del.classList.remove("hidden"); }
+  else { thumb.removeAttribute("src"); thumb.style.display = "none"; del.classList.add("hidden"); }
 }
-
 function downscale(file) {
   return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
+    const img = new Image(); const url = URL.createObjectURL(file);
     img.onload = () => {
       const scale = Math.min(1, PHOTO_MAX / Math.max(img.width, img.height));
       const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
-      const c = document.createElement("canvas");
-      c.width = w; c.height = h;
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
       c.getContext("2d").drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      resolve(c.toDataURL("image/jpeg", 0.7));
+      URL.revokeObjectURL(url); resolve(c.toDataURL("image/jpeg", 0.7));
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("画像を読めません")); };
     img.src = url;
   });
 }
-
 document.getElementById("f-photo").addEventListener("change", async (e) => {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
-  try { setPhoto(await downscale(file)); saveDraft(); }
-  catch { showErr("写真を読み込めませんでした"); }
-  e.target.value = "";   // 同じ写真でも再選択できるように
+  const file = e.target.files && e.target.files[0]; if (!file) return;
+  try { setPhoto(await downscale(file)); saveDraft(); } catch { showErr("写真を読み込めませんでした"); }
+  e.target.value = "";
 });
 document.getElementById("photo-del").addEventListener("click", () => { setPhoto(null); saveDraft(); });
 
-// --- 送信（POST /api/survey） ----------------------------------------------
-
+// 送信
 function showErr(msg) {
   const el = document.getElementById("survey-err");
   el.textContent = "⚠ " + msg; el.classList.remove("hidden");
 }
-
 function gotoNextUndone() {
-  for (let j = idx + 1; j < order.length; j++)
-    if (!lsGet(LS.draft(order[j]), {}).done) return loadBuilding(j);
-  // 後ろが無ければ、未調査を先頭から探す
-  const k = order.findIndex((id) => !lsGet(LS.draft(id), {}).done);
+  for (let j = idx + 1; j < planOrder.length; j++)
+    if (!lsGet(LS.draft(planOrder[j]), {}).done) return loadBuilding(j);
+  const k = planOrder.findIndex((id) => !lsGet(LS.draft(id), {}).done);
   if (k >= 0) loadBuilding(k);
-  else { alert("選んだ棟をすべて調査しました。お疲れさまでした。"); document.getElementById("survey-back").click(); }
+  else { alert("選んだ棟をすべて調査しました。お疲れさまでした。");
+         document.getElementById("input-back").click(); }
 }
-
 document.getElementById("nav-save").addEventListener("click", async () => {
-  saveDraft();   // まず端末に確実に残す
+  saveDraft();
   const f = readForm();
   const operator = lsGet(LS.operator, "") || null;
-  if (!f.usage && f.storeys == null && !f.note && !f.photo) {
+  if (!f.usage && f.storeys == null && !f.note && !f.photo)
     return showErr("用途・階数・写真・メモのいずれかを入力してください");
-  }
   const btn = document.getElementById("nav-save");
   btn.disabled = true; btn.textContent = "送信中…";
   try {
-    const res = await fetch("/api/survey", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...f, operator }),
-    });
+    const res = await fetch("/api/survey", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...f, operator }) });
     if (!res.ok) throw new Error("サーバーエラー " + res.status);
-    const id = order[idx];
-    lsSet(LS.draft(id), { ...lsGet(LS.draft(id), {}), done: true });
-    btn.disabled = false;
-    gotoNextUndone();
-  } catch (err) {
+    lsSet(LS.draft(f.building_id), { ...lsGet(LS.draft(f.building_id), {}), done: true });
+    btn.disabled = false; gotoNextUndone();
+  } catch {
     btn.disabled = false; btn.textContent = "保存して次へ";
     showErr("送信できませんでした（通信を確認）。入力は端末に保存済みです。");
   }
 });
-
 document.getElementById("nav-prev").addEventListener("click", () => { if (idx > 0) loadBuilding(idx - 1); });
-document.getElementById("nav-next").addEventListener("click", () => { if (idx < order.length - 1) loadBuilding(idx + 1); });
+document.getElementById("nav-next").addEventListener("click", () => { if (idx < planOrder.length - 1) loadBuilding(idx + 1); });
 
 // --- 起動 -------------------------------------------------------------------
 loadAll();
