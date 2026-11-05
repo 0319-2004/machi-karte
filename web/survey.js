@@ -245,6 +245,7 @@ function updateSelbar() {
   document.getElementById("sel-n").textContent = selected.length;
   const btn = document.getElementById("start-btn");
   btn.disabled = selected.length === 0;
+  document.getElementById("sel-clear").classList.toggle("hidden", selected.length === 0);
   const ul = document.getElementById("sel-list");
   ul.innerHTML = "";
   for (const id of selected) {
@@ -259,6 +260,16 @@ document.getElementById("sel-head").addEventListener("click", () => {
   const list = document.getElementById("sel-list");
   const hidden = list.classList.toggle("hidden");
   document.getElementById("sel-caret").textContent = hidden ? "▸" : "▾";
+});
+// 選択した地点をすべて解除（一覧の開閉とは別操作なので伝播を止める）
+document.getElementById("sel-clear").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!selected.length) return;
+  selected.length = 0;
+  lsSet(LS.selected, selected);
+  if (typeof paintSel === "function") paintSel();
+  renderPickList();
+  updateSelbar();
 });
 document.getElementById("operator").addEventListener("input", (e) =>
   lsSet(LS.operator, e.target.value.trim()));

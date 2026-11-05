@@ -68,6 +68,9 @@
     .selbar-head { display:flex; align-items:center; justify-content:space-between;
       padding:9px var(--pad); font-size:14px; }
     .selbar-head b { color:var(--accent); font-size:16px; }
+    .selbar-head-right { display:flex; align-items:center; gap:10px; }
+    #sel-clear { border:1px solid #c62828; background:#fff; color:#c62828; border-radius:8px;
+      padding:5px 10px; font-size:13px; font-weight:600; }
     #sel-list { max-height:30vh; overflow-y:auto; margin:0; padding:0; list-style:none;
       border-top:1px solid #f0f0f0; }
     #sel-list li { display:flex; align-items:center; gap:8px; padding:8px var(--pad);
@@ -169,7 +172,11 @@
     </div>
     <div class="selbar">
       <div class="selbar-head" id="sel-head" role="button">
-        <span>選択中 <b id="sel-n">0</b>棟（タップで一覧）</span><span id="sel-caret">▸</span>
+        <span>選択中 <b id="sel-n">0</b>棟（タップで一覧）</span>
+        <span class="selbar-head-right">
+          <button type="button" id="sel-clear" class="hidden">すべて解除</button>
+          <span id="sel-caret">▸</span>
+        </span>
       </div>
       <ul id="sel-list" class="hidden"></ul>
       <div class="selbar-foot">
