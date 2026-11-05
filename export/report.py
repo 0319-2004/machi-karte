@@ -454,16 +454,57 @@ def _append_log(facts: dict, model: str, meta: dict) -> None:
         }, ensure_ascii=False) + "\n")
 
 
+# --- 生成（接続に依存しない。CLI と API で共用） ----------------------------
+
+def build_markdown(facts: dict, city_code: str = CITY_CODE,
+                   model: str | None = None) -> tuple[str, dict]:
+    """facts（SQL 集計済み）から Markdown と生成メタを返す。接続もファイルも触らない。
+
+    確定0件なら Claude を呼ばず『確定された棟がありません』を返す（API 0回）。
+    DB アクセス（compute_facts）とは分けてあるので、呼び出し側でロックを解いてから
+    この関数（＝Claude 呼び出し）を実行できる。
+    """
+    from estimate.claude_infer import get_model
+
+    if facts["confirmed_buildings"] == 0:
+        return _empty_report(facts, city_code), {
+            "skipped": True, "api_calls": 0, "model": None,
+            "usage": None, "cost_usd": None, "cached": False}
+
+    model = model or get_model()
+    res = generate_prose(facts, model)
+    meta = {"usage": res["usage"], "cost_usd": res["cost_usd"],
+            "cached": res["cached"], "model": model, "skipped": False,
+            "api_calls": 0 if res["cached"] else 1}
+    return render_markdown(facts, res["prose"], model, meta), meta
+
+
 # --- CLI --------------------------------------------------------------------
+
+class ServerRunningError(RuntimeError):
+    """API サーバー起動中で DB がロックされているときに投げる（CLI 用）。"""
+
+
+def _is_lock_error(exc: Exception) -> bool:
+    s = str(exc)
+    return "lock" in s.lower() or "Conflicting lock" in s
+
 
 def run(db_path: str | None = None, city_code: str = CITY_CODE,
         version: str = VERSION, out_dir: str = DEFAULT_OUT,
         model: str | None = None, dry_run: bool = False) -> dict:
-    from estimate.claude_infer import get_model
+    import duckdb
 
-    con = connect(db_path) if db_path else connect()
-    facts = compute_facts(con, city_code, version)
-    con.close()
+    try:
+        con = connect(db_path) if db_path else connect()
+    except duckdb.IOException as e:
+        if _is_lock_error(e):
+            raise ServerRunningError from e
+        raise
+    try:
+        facts = compute_facts(con, city_code, version)
+    finally:
+        con.close()
 
     print("=== 調査レポートの生成 ===")
     print(f"  city_code={city_code} version={version}")
@@ -476,38 +517,28 @@ def run(db_path: str | None = None, city_code: str = CITY_CODE,
         print(json.dumps(_facts_for_prompt(facts), ensure_ascii=False, indent=2))
         return {"dry_run": True, **facts}
 
-    # 確定0件：数字の根拠がないので Claude を呼ばず、確定がないことを明示して返す。
-    if facts["confirmed_buildings"] == 0:
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"report_{city_code}.md")
-        with open(out_path, "w", encoding="utf-8") as fp:
-            fp.write(_empty_report(facts, city_code))
-        _append_log(facts, "(skipped)", {"usage": None, "cost_usd": None, "cached": False})
-        print("  確定0件：Claude 生成をスキップ（API 0 回）。『確定された棟がありません』を出力。")
-        print(f"  Markdown    : {out_path}")
-        return {"report": out_path, "confirmed_buildings": 0, "skipped": True,
-                "api_calls": 0}
-
-    model = model or get_model()
-    res = generate_prose(facts, model)
-    meta = {"usage": res["usage"], "cost_usd": res["cost_usd"], "cached": res["cached"]}
-    md = render_markdown(facts, res["prose"], model, meta)
+    md, meta = build_markdown(facts, city_code, model)
 
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"report_{city_code}.md")
     with open(out_path, "w", encoding="utf-8") as fp:
         fp.write(md)
-    _append_log(facts, model, meta)
+    _append_log(facts, meta.get("model") or "(skipped)", meta)
 
-    tag = "キャッシュ" if res["cached"] else (
-        f"${res['cost_usd']:.5f}" if res["cost_usd"] is not None else "費用不明")
-    print(f"  API 呼び出し: 1 回（{tag}）model={model}")
+    if meta["skipped"]:
+        print("  確定0件：Claude 生成をスキップ（API 0 回）。『確定された棟がありません』を出力。")
+    else:
+        tag = "キャッシュ" if meta["cached"] else (
+            f"${meta['cost_usd']:.5f}" if meta["cost_usd"] is not None else "費用不明")
+        print(f"  API 呼び出し: {meta['api_calls']} 回（{tag}）model={meta['model']}")
     print(f"  Markdown    : {out_path}")
-    return {"report": out_path, "model": model, **meta,
-            "confirmed_buildings": facts["confirmed_buildings"]}
+    return {"report": out_path, "confirmed_buildings": facts["confirmed_buildings"],
+            **meta}
 
 
 def main() -> None:
+    import sys
+
     load_dotenv()   # .env の ANTHROPIC_API_KEY / CLAUDE_MODEL
     data_dir = os.environ.get("DATA_DIR", "./data")
     p = argparse.ArgumentParser(description="確定済みの棟から調査レポート（Markdown）を生成する")
@@ -519,7 +550,13 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true",
                    help="API を呼ばず、数字（facts）だけ出す")
     args = p.parse_args()
-    run(args.db, args.city_code, args.version, args.out_dir, args.model, args.dry_run)
+    try:
+        run(args.db, args.city_code, args.version, args.out_dir, args.model, args.dry_run)
+    except ServerRunningError:
+        print("⚠ DB がロックされています。API サーバー（uvicorn）が起動中は CLI でレポート生成"
+              "できません。\n   → サーバーを止めてから再実行するか、画面の「レポート生成」"
+              "（POST /api/report）を使ってください。", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

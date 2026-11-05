@@ -16,6 +16,18 @@
 
 ---
 
+## 2026-11-05 デモを画面だけで完結：出力はAPI経由、ロック時はCLIが親切に止まる、確定経路をCSVに
+
+- 背景 / きっかけ：通しで見つかった3点（demo-reset 不在／DuckDB ロックで起動中に出力不可／CSVで現地と机上が混ざる）を直し、デモをターミナルに切り替えず画面だけで回せるようにする。
+- 判断：
+  - **`make demo-reset` を追加**（`reset-confirmations` の別名、両方残す）。あわせて優先度リストを**西新宿（都庁1km圏）先頭・score降順・building_id で決定**に変更（`api/priority.py` の `NISHI_FLAG_SQL` と ORDER BY）。初期表示も都庁なので、画面の位置と優先度トップが毎回一致し、同じ棟から始められる。
+  - **DuckDB は単一プロセス書き込み**。出力を画面から行えるよう、CSV/GeoJSON は既存の API（`/api/export.csv`・`/api/export.geojson`、共有 RW 接続）で取得、**レポートは `POST /api/report` を新設**（`compute_facts` は `db_lock` 内、時間のかかる Claude 生成 `build_markdown` はロック外）。`export/report.py` を接続非依存の `build_markdown(facts,...)` に分離して CLI と API で共用。`web/` にレポート生成ボタンを追加。
+  - **CLI は残すが、サーバー起動中に叩いたら親切に止める**。`duckdb.IOException`（lock）を捕まえ、トレースバックではなく「サーバーを止めてください／画面の機能を使ってください」と出して `exit 1`（`export/__main__.py`・`export/report.py`）。
+  - **確定経路を CSV/GeoJSON に出す**。`source`（推定の出どころ）とは別に **`confirmed_via`（desk / onsite）** 列を追加（`confirmations.source` 由来、`export/update_candidates.py`）。`docs/design.md` の列定義と同梱 README にも追記。
+  - サーバーは `.env` を読む（`api/main.py` で `load_dotenv()`）＝レポートの Claude 生成に API キーが要るため。
+- 根拠（実データで確認、サーバー起動中）：優先度トップ6が全て西新宿（都庁 ≤1km, 713〜902m）・2回取得で並び一致。`make export`/report CLI はロック時に親切メッセージ＋exit。画面経路で 机上2＋現地1 を確定→`/api/export.csv` に `confirmed_via` 列（現地棟＝onsite / 机上＝desk）→`POST /api/report` 200・現地節1棟。`pytest` 31 passed。demo-reset 後はクリーン（0/0）・トップ=1177(119.5m)。
+- 影響範囲：デモはすべて画面から（確定→ダウンロード→レポート生成）。CLI は開発者向けにサーバー停止時のみ。優先度の並びは西新宿先頭に変えた（score の意味は各グループ内で不変）。
+
 ## 2026-11-05 通し確認：確定0件のレポートはClaudeを呼ばない／DuckDBはサーバーとCLIが排他
 
 - 背景 / きっかけ：ingest から通しで動かした直後（confirmations が空）に export と report を叩いたらどうなるかを確認し、通しの動作確認（reset→確認3棟→現地1棟→export→report）を実施した。

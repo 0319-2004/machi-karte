@@ -15,12 +15,15 @@ import re
 import statistics
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from export.report import build_markdown, compute_facts
+from export.report import _append_log as report_append_log
 from export.update_candidates import csv_bytes, fetch_rows, geojson_obj
 from .build_geojson import build_if_missing
 from .codelists import load_usage_codes, usage_label_map
@@ -28,6 +31,8 @@ from .db import DERIVED_DIR, VERSION, db_lock, get_con
 from .onsite import aggregate_unresolved, load_guidance
 from .priority import TARGETS_SQL, demo_counts
 from .schema import ensure_tables
+
+load_dotenv()   # .env の ANTHROPIC_API_KEY / CLAUDE_MODEL（レポートの Claude 生成で使う）
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
@@ -493,6 +498,31 @@ def export_geojson(city_code: str = "13104") -> Response:
         content=data, media_type="application/geo+json",
         headers={"Content-Disposition":
                  f'attachment; filename="update_candidates_{city_code}.geojson"'},
+    )
+
+
+@app.post("/api/report")
+def report_md(city_code: str = "13104") -> Response:
+    """調査レポート（Markdown）をサーバー側で生成して返す（CLI 不要・画面から生成）。
+
+    数字の集計（compute_facts）は db_lock 内で行い、時間のかかる Claude 生成
+    （build_markdown）はロックを解いてから実行する（他の操作を止めない）。
+    確定0件なら Claude を呼ばず『確定された棟がありません』を返す。CSV/GeoJSON と
+    同じ場所にも保存する。
+    """
+    with db_lock:
+        facts = compute_facts(get_con(), city_code, VERSION)
+    md, meta = build_markdown(facts, city_code)   # Claude はロック外
+
+    out_dir = os.path.join(DERIVED_DIR, "export")
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, f"report_{city_code}.md"), "w", encoding="utf-8") as f:
+        f.write(md)
+    report_append_log(facts, meta.get("model") or "(skipped)", meta)
+
+    return Response(
+        content=md.encode("utf-8"), media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="report_{city_code}.md"'},
     )
 
 

@@ -30,6 +30,17 @@ SCORE_SQL = f"""
 + {W_IMAGE}  * (CASE WHEN b.lod_type = 'LOD2' THEN 1 ELSE 0 END)
 """
 
+# デモの開始点を固定する。西新宿（都庁から半径1km, EPSG:6677 の円）の棟を先頭に寄せ、
+# その中は score 降順、最後に building_id で完全に決定づける（毎回同じ並び＝再現可能）。
+# 初期表示も都庁（139.6917, 35.6896）なので、画面の位置と優先度トップが一致する。
+NISHI_FLAG_SQL = """
+COALESCE(
+  ST_Distance(
+    ST_Centroid(b.geom),
+    ST_Transform(ST_Point(139.6917, 35.6896), 'EPSG:4326', 'EPSG:6677', true)
+  ) <= 1000, FALSE)
+"""
+
 TARGETS_SQL = f"""
 WITH new_ids AS (
     SELECT DISTINCT building_id FROM candidates
@@ -46,7 +57,7 @@ SELECT b.building_id, b.height_m, b.storeys_above, b.usage,
 FROM buildings b
 LEFT JOIN new_ids n ON n.building_id = b.building_id
 WHERE b.version = ? AND b.is_target AND b.geom_4326 IS NOT NULL
-ORDER BY confirmed ASC, score DESC
+ORDER BY confirmed ASC, ({NISHI_FLAG_SQL}) DESC, score DESC, b.building_id
 LIMIT ?
 """
 

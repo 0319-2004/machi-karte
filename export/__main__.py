@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
+import duckdb
 from dotenv import load_dotenv
 
 from .update_candidates import CITY_CODE, VERSION, run
@@ -23,7 +25,16 @@ def main() -> None:
     p.add_argument("--db", default=os.path.join(data_dir, "machikarte.duckdb"))
     p.add_argument("--out-dir", default=os.path.join(data_dir, "derived", "export"))
     args = p.parse_args()
-    run(args.db, args.city_code, args.version, args.out_dir)
+    try:
+        run(args.db, args.city_code, args.version, args.out_dir)
+    except duckdb.IOException as e:
+        if "lock" in str(e).lower():
+            print("⚠ DB がロックされています。API サーバー（uvicorn）が起動中は CLI で出力"
+                  "できません。\n   → サーバーを止めてから再実行するか、画面の「更新候補を"
+                  "ダウンロード」（/api/export.csv・/api/export.geojson）を使ってください。",
+                  file=sys.stderr)
+            sys.exit(1)
+        raise
 
 
 if __name__ == "__main__":

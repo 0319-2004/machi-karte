@@ -88,6 +88,32 @@ async function loadExportSummary() {
   el.classList.toggle("empty", s.rows === 0);
 }
 
+// --- レポート生成（POST /api/report → Markdown をダウンロード） ------------
+const dlReport = document.getElementById("dl-report");
+dlReport.addEventListener("click", async () => {
+  const orig = dlReport.textContent;
+  dlReport.disabled = true;
+  dlReport.textContent = "生成中…";
+  try {
+    const res = await fetch("/api/report?city_code=13104", { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "report_13104.md";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("レポート生成に失敗しました：" + e.message);
+  } finally {
+    dlReport.disabled = false;
+    dlReport.textContent = orig;
+  }
+});
+
 // --- 現地確認が必要な棟（判断不能の集約） ----------------------------------
 const onsiteBar = document.getElementById("onsite-bar");
 const onsitePanel = document.getElementById("onsite-panel");

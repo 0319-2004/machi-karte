@@ -175,3 +175,7 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Hiragino Sans", s
 #download a:hover { background: #0d47a1; }
 #download.empty a { background: #cfd8dc; color: #eceff1; pointer-events: none; }
 #download.empty #dl-count { color: #90a4ae; }
+#download #dl-report { padding: 5px 12px; border-radius: 7px; background: #2e7d32; color: #fff;
+  border: none; font-weight: 700; font-size: 13px; cursor: pointer; }
+#download #dl-report:hover { background: #1b5e20; }
+#download #dl-report:disabled { background: #a5d6a7; cursor: default; }

@@ -305,6 +305,7 @@ AND survey_year = '0001'
 | `confidence` | 推定時の信頼度 |
 | `reasoning` | 推定の根拠（Claudeが返した文章） |
 | `confirmed_by` | 確定した人 |
+| `confirmed_via` | 確定の経路。`desk`（机上の確認画面）/ `onsite`（スマホの現地調査）。`source` が推定の出どころを表すのに対し、こちらは誰がどこで確定したかを表す（2026-11-05 追記） |
 | `confirmed_at` | 確定日時 |
 | `evidence_url` | 根拠になった画像やPOIへの参照 |
 

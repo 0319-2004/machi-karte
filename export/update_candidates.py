@@ -36,7 +36,8 @@ ATTR_OUT = {"usage": "usage", "storeys": "storeys_above", "year_built": "year_bu
 CSV_COLUMNS = [
     "building_id", "attribute", "current_value", "current_label",
     "proposed_value", "proposed_label", "source", "confidence", "reasoning",
-    "confirmed_by", "confirmed_at", "evidence_url", "value_min", "value_max",
+    "confirmed_by", "confirmed_via", "confirmed_at", "evidence_url",
+    "value_min", "value_max",
 ]
 
 ATTRIBUTION = "出典：国土交通省 Project PLATEAU（新宿区）。近傍推定は PLATEAU 既知棟由来。"
@@ -99,7 +100,8 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
     conf_rows = con.execute(
         """
         SELECT c.building_id, c.attribute, c.confirmed_value, c.accepted_candidate,
-               c.confirmed_at, c.confirmed_by, b.raw_usage, b.raw_storeys_above
+               c.confirmed_at, c.confirmed_by, b.raw_usage, b.raw_storeys_above,
+               COALESCE(c.source, 'desk') AS confirmed_via
         FROM confirmations c
         JOIN buildings b ON b.building_id=c.building_id AND b.version=c.version
         WHERE c.version=? AND b.city_code=?
@@ -111,7 +113,8 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
     ev = _evidence_map(con, version)
 
     out = []
-    for (bid, attr, cval, accepted, cat, cby, raw_usage, raw_storeys) in conf_rows:
+    for (bid, attr, cval, accepted, cat, cby, raw_usage, raw_storeys,
+         confirmed_via) in conf_rows:
         c = cand.get((bid, attr), {})
         vmin, vmax = c.get("value_min"), c.get("value_max")
 
@@ -143,6 +146,7 @@ def fetch_rows(con, city_code: str = CITY_CODE, version: str = VERSION) -> list[
             "confidence": "" if confidence is None else round(float(confidence), 2),
             "reasoning": reasoning or "",
             "confirmed_by": cby or "担当者",
+            "confirmed_via": confirmed_via or "desk",
             "confirmed_at": str(cat) if cat is not None else "",
             "evidence_url": ev_labels,
             "value_min": "" if vmin is None else vmin,

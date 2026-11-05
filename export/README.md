@@ -53,5 +53,7 @@ PLATEAU 新宿区（13104）の建物属性について、人が地図で確認�
 
 `source` は推定の由来（`neighbor`／`height`／`version_diff`／`poi`／`osm_building`／`image`、
 `manual`＝人が修正）。`confidence` は推定時の信頼度、`reasoning` は根拠の文章です。
+`confirmed_via` は確定の経路で、`desk`（机上の確認画面）か `onsite`（スマホの現地調査）です。
+`source` が推定の出どころなのに対し、`confirmed_via` は誰がどこで確定したかを表します。
 
 <!-- ここまで出力同梱用テンプレート -->
