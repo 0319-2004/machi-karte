@@ -45,6 +45,8 @@ VOICE_SYSTEM = (
     "地下階・塔屋は数えない。言及が無い・曖昧なら null。"
     "\n- features: 用途・階数以外で調査メモに残すべき特徴（外観・看板・空室・工事中など）。無ければ null。"
     "\n推測で埋めないこと。はっきり述べられていない項目は必ず null にする。"
+    "\n1つの発話の中で同じ項目を複数回述べて食い違う場合（例：『5階、いや3階』）は、"
+    "**後に述べた値**を採用する（最後の言い直しを優先）。"
     "\n【2. 聞き返し】"
     "\n- dont_know: 直前の質問に対して調査員が『分からない』『不明』など確認できない旨を"
     "答えた項目名（usage / storeys）を入れる。無ければ空配列。"
@@ -156,7 +158,7 @@ def parse_voice(text: str, usage_codes: list[dict], *,
     codes_blob = "\n".join(f"{u['code']}: {u['label']}" for u in usage_codes)
 
     # キャッシュ键：テキスト＋状態（質問は状態に依存するため状態も含める）
-    key = {"model": model, "v": 3, "codes": sorted(valid), "text": text,
+    key = {"model": model, "v": 4, "codes": sorted(valid), "text": text,
            "status": status_n, "pending": pending,
            "givenup": sorted(givenup_set), "asked": int(asked)}
     blob = json.dumps(key, sort_keys=True, ensure_ascii=False)

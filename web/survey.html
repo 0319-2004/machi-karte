@@ -154,6 +154,14 @@
     .voice-q { margin:6px 0; padding:12px 13px; border-radius:10px; background:#fff3e0;
       border:1px solid #ffcc80; color:#5d4037; font-size:16px; font-weight:700; line-height:1.45; }
     .voice-q .q-hint { display:block; margin-top:5px; font-size:12px; font-weight:400; color:var(--sub); }
+    /* 反映前の確認パネル */
+    .voice-proposal { margin:6px 0; padding:11px 12px; border-radius:10px;
+      background:#e8f5e9; border:1px solid #a5d6a7; }
+    .voice-proposal .vp-text { font-size:15px; font-weight:700; color:#1b5e20; line-height:1.45; }
+    .vp-actions { display:flex; gap:8px; margin-top:9px; }
+    .vp-actions button { flex:1; border-radius:9px; padding:10px; font-size:15px; font-weight:700; }
+    #vp-apply { border:none; background:var(--ok); color:#fff; }
+    #vp-redo { border:1px solid var(--line); background:#fff; color:var(--sub); }
     .voice-fill { margin:2px 0 4px; font-size:12px; color:var(--sub); }
     .voice-fill .chip { margin-right:10px; }
     .voice-fill .ok { color:var(--ok); font-weight:700; }
@@ -275,6 +283,13 @@
           <span class="voice-status" id="voice-status"></span>
         </div>
         <div class="voice-q hidden" id="voice-question"></div>
+        <div class="voice-proposal hidden" id="voice-proposal">
+          <div class="vp-text" id="vp-text"></div>
+          <div class="vp-actions">
+            <button type="button" id="vp-apply">反映</button>
+            <button type="button" id="vp-redo">やり直す</button>
+          </div>
+        </div>
         <div class="voice-fill hidden" id="voice-fill"></div>
         <textarea id="f-note" placeholder="気づいたこと"></textarea>
       </div>

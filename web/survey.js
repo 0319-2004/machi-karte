@@ -520,7 +520,7 @@ async function loadBuilding(i) {
   stopVoice(true);                 // 棟を移動したら音声は止める（振り分けない）
   vStatus("");
   vAsked = 0; vGivenUp = new Set(); vEst = { usage: "none", storeys: "none" };
-  hideQuestion();                  // 棟ごとに聞き返しをリセット
+  vProposal = null; hideQuestion(); hideProposal();   // 棟ごとに聞き返し・確認をリセット
   idx = i;
   const id = planOrder[idx];
   document.getElementById("survey-bid").textContent = id;
@@ -692,6 +692,7 @@ let vAsked = 0;              // これまで尋ねた質問数（3往復で打�
 let vPending = null;         // いま表示中の質問が尋ねている項目（usage/storeys）
 let vGivenUp = new Set();    // 「分からない」と答えた項目（判断不能として記録・もう聞かない）
 let vEst = { usage: "none", storeys: "none" };  // 自動推定の状態（質問の出し分け用）
+let vProposal = null;        // 反映前の確認内容（「反映」を押すまで各欄に入れない）
 
 function vStatus(msg, isErr) {
   const el = document.getElementById("voice-status");
@@ -716,6 +717,8 @@ function startVoice() {
   recog.lang = "ja-JP";
   recog.continuous = true;
   recog.interimResults = true;
+  // 確認待ちのまま話し直したら、その未反映ぶんは取り消してメモを戻す
+  if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
   voiceBase = document.getElementById("f-note").value.trim();
   voiceFinal = "";
   voiceStopping = false;
@@ -806,6 +809,63 @@ function hideQuestion() {
   vPending = null;
   document.getElementById("voice-question").classList.add("hidden");
 }
+function usageOptionExists(code) {
+  return code && [...document.getElementById("f-usage").options]
+    .some((o) => o.value === String(code));
+}
+function doneStatus() {
+  const gu = [...vGivenUp].map((i) => (i === "usage" ? "用途" : "階数"));
+  return (vAsked > 0 ? `音声 ${vAsked}往復で確認完了` : "確認しました")
+    + (gu.length ? `（${gu.join("・")}は判断不能）` : "");
+}
+
+function showProposal(p) {
+  const parts = [];
+  if (p.usage) parts.push(`用途：${p.usageLabel}`);
+  if (p.storeys != null) parts.push(`階数：${p.storeys}階`);
+  document.getElementById("vp-text").textContent = `${parts.join(" ／ ")} を入力します`;
+  document.getElementById("voice-question").classList.add("hidden");  // 確認中は質問を隠す
+  document.getElementById("voice-proposal").classList.remove("hidden");
+}
+function hideProposal() {
+  document.getElementById("voice-proposal").classList.add("hidden");
+}
+// 「反映」：確認した内容だけを各欄へ入れ、メモから反映済みを消す（特徴は残す）
+function applyProposal() {
+  const p = vProposal; if (!p) return;
+  const applied = [];
+  if (p.storeys != null) {
+    document.getElementById("f-storeys").value = p.storeys;
+    applied.push(`階数 ${p.storeys}階`);
+  }
+  if (usageOptionExists(p.usage)) {
+    document.getElementById("f-usage").value = String(p.usage);
+    applied.push(`用途 ${p.usageLabel}`);
+  }
+  // メモ整理：発話前メモ ＋ 反映しなかった特徴だけ残す（反映済みの文言は消す）
+  const kept = (p.features || "").trim();
+  document.getElementById("f-note").value = p.base + (p.base && kept ? "\n" : "") + kept;
+  saveDraft();
+  hideProposal();
+  vProposal = null;
+
+  let msg = `反映：${applied.join("・")}`;
+  msg += kept ? `／メモに残した：「${kept}」` : "／メモを整理しました";
+  if (p.question) { vAsked += 1; showQuestion(p.question, p.questionTarget); msg += "。次の質問にどうぞ"; }
+  else { hideQuestion(); }
+  vStatus(msg);
+  refreshVoiceFill();
+}
+// 「やり直す」：各欄は変えず、この発話ぶんをメモから取り消す
+function redoProposal() {
+  const p = vProposal; if (!p) return;
+  document.getElementById("f-note").value = p.base;
+  saveDraft();
+  hideProposal();
+  vProposal = null;
+  vStatus("やり直しました。もう一度どうぞ");
+  refreshVoiceFill();
+}
 
 async function finishVoice() {
   voiceActive = false;
@@ -818,6 +878,7 @@ async function finishVoice() {
 
   vStatus("内容を振り分け中…");
   const askedPending = vPending;   // この発話が答えている質問の項目
+  const base = voiceBase;          // この発話前のメモ（反映/やり直しで戻す基準）
   try {
     const res = await fetch("/api/voice_parse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -830,35 +891,26 @@ async function finishVoice() {
     if (!res.ok) throw new Error(String(res.status));
     const d = await res.json();
 
-    const filled = [];
-    if (d.storeys != null) {
-      document.getElementById("f-storeys").value = d.storeys;
-      filled.push(`階数 ${d.storeys}`);
-    }
-    if (d.usage) {
-      const sel = document.getElementById("f-usage");
-      if ([...sel.options].some((o) => o.value === String(d.usage))) {
-        sel.value = String(d.usage);
-        const lbl = usageCodes.find((u) => String(u.code) === String(d.usage));
-        filled.push(`用途 ${lbl ? lbl.label : d.usage}`);
-      }
-    }
-    // 「分からない」と答えた項目は判断不能として記録し、もう聞かない
+    // 「分からない」は欄を変えないので確認不要。即時に判断不能として記録。
     (d.dont_know || []).forEach((it) => vGivenUp.add(it));
-    saveDraft();
 
-    if (d.question) {                       // まだ足りない → 質問を1つ出す
+    const usageLabel = d.usage ? ((usageCodes.find((u) => String(u.code) === String(d.usage)) || {}).label || d.usage) : null;
+    const hasField = (d.storeys != null) || usageOptionExists(d.usage);
+    if (hasField) {
+      // 反映前に一度確認を挟む（自動では各欄に入れない）
+      vProposal = { storeys: d.storeys, usage: d.usage, usageLabel, features: d.features,
+                    question: d.question, questionTarget: d.question_target, base };
+      showProposal(vProposal);
+      vStatus("内容を確認して「反映」を押してください");
+    } else if (d.question) {           // 入れる欄は無いが、まだ足りない → 質問
       vAsked += 1;
       showQuestion(d.question, d.question_target);
-      vStatus(filled.length ? `${filled.join("・")} を入力。次の質問にどうぞ`
-                            : "質問にお答えください（🎤 か手入力）");
-    } else {                                // 全部埋まった／これ以上聞かない
+      vStatus("質問にお答えください（🎤 か手入力）");
+    } else {                           // 入れる欄も質問も無い
       hideQuestion();
-      const gu = [...vGivenUp].map((i) => (i === "usage" ? "用途" : "階数"));
-      vStatus((filled.length ? `${filled.join("・")} を入力。` : "")
-        + (vAsked > 0 ? `音声 ${vAsked}往復で確認完了` : "確認しました")
-        + (gu.length ? `（${gu.join("・")}は判断不能）` : ""));
+      vStatus(doneStatus());
     }
+    saveDraft();
     refreshVoiceFill();
   } catch {
     // 振り分け失敗でもメモは残っている。手入力で続けられる。
@@ -880,6 +932,8 @@ if (voiceSupported) {
   });
   document.getElementById("voice-cancel").addEventListener("click", () =>
     document.getElementById("voice-consent").classList.add("hidden"));
+  document.getElementById("vp-apply").addEventListener("click", applyProposal);
+  document.getElementById("vp-redo").addEventListener("click", redoProposal);
 }
 
 // --- 起動 -------------------------------------------------------------------
