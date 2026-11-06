@@ -174,18 +174,24 @@ function setupBoxSelect() {
   document.getElementById("box-toggle").addEventListener("click", (e) => {
     boxMode = !boxMode;
     e.currentTarget.classList.toggle("on", boxMode);
-    if (boxMode) pickMap.dragPan.disable(); else pickMap.dragPan.enable();
+    wrap.classList.toggle("box-on", boxMode);   // touch-action:none でスクロール/ズームを止める
+    // 指のドラッグを矩形に使うため、地図側のジェスチャを全部止める（スマホ対策）
+    const g = [pickMap.dragPan, pickMap.touchZoomRotate, pickMap.touchPitch, pickMap.doubleClickZoom];
+    g.forEach((h) => h && (boxMode ? h.disable() : h.enable()));
   });
 
   wrap.addEventListener("pointerdown", (ev) => {
     if (!boxMode) return;
-    ev.preventDefault(); start = pt(ev);
+    ev.preventDefault();
+    try { wrap.setPointerCapture(ev.pointerId); } catch {}   // 指が外れても追従
+    start = pt(ev);
     rect.style.display = "block";
     rect.style.left = start.x + "px"; rect.style.top = start.y + "px";
     rect.style.width = "0px"; rect.style.height = "0px";
   });
   wrap.addEventListener("pointermove", (ev) => {
     if (!boxMode || !start) return;
+    ev.preventDefault();
     const p = pt(ev);
     rect.style.left = Math.min(start.x, p.x) + "px";
     rect.style.top = Math.min(start.y, p.y) + "px";
@@ -231,13 +237,48 @@ function renderPickList() {
 }
 document.getElementById("toggle-list").addEventListener("click", (e) => {
   const list = document.getElementById("pick-list");
-  const hidden = list.classList.toggle("hidden");
-  e.currentTarget.classList.toggle("on", !hidden);
+  const nowHidden = list.classList.toggle("hidden");      // true=地図表示に戻った
+  e.currentTarget.classList.toggle("on", !nowHidden);
+  e.currentTarget.textContent = nowHidden ? "リスト" : "地図";  // 戻り先を明示
+  if (nowHidden && pickMap) setTimeout(() => pickMap.resize(), 50);  // 地図を描き直す
 });
 document.getElementById("more-btn").addEventListener("click", () => {
   displayLimit = displayLimit >= 2000 ? targets.length
     : displayLimit >= 500 ? 2000 : displayLimit >= 100 ? 500 : 100;
   refreshPickSource(); renderPickList();
+});
+
+// --- 更新候補の出力（スマホから直接ダウンロード／生成） ---------------------
+const dlPanel = document.getElementById("dl-panel");
+document.getElementById("dl-open").addEventListener("click", async () => {
+  dlPanel.classList.remove("hidden");
+  try {
+    const s = await (await fetch("/api/export/summary")).json();
+    const n = s.buildings || 0;
+    document.getElementById("dl-count").textContent = n > 0
+      ? `確定済み ${n} 棟から出力します（CSV / GeoJSON / レポート）。`
+      : "まだ確定した棟がありません。確定すると出力できます。";
+    const dis = n === 0;
+    document.getElementById("dl-csv").classList.toggle("disabled", dis);
+    document.getElementById("dl-geojson").classList.toggle("disabled", dis);
+    document.getElementById("dl-report").disabled = dis;
+  } catch { document.getElementById("dl-count").textContent = "件数を取得できませんでした。"; }
+});
+document.getElementById("dl-close").addEventListener("click", () => dlPanel.classList.add("hidden"));
+document.getElementById("dl-report").addEventListener("click", async (e) => {
+  const btn = e.currentTarget, old = btn.textContent;
+  btn.disabled = true; btn.textContent = "生成中…（Claudeで要約・30秒ほど）";
+  try {
+    const res = await fetch("/api/report?city_code=13104", { method: "POST" });
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "report_13104.md";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    btn.textContent = "生成しました";
+  } catch { btn.textContent = "生成に失敗しました"; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 2500);
 });
 
 // 下部：選択中 N棟
@@ -837,19 +878,14 @@ function applyTranscript(interim) {
   document.getElementById("f-note").value = voiceBase + sep + spoken;
 }
 
-function startVoice() {
-  if (!voiceSupported || voiceActive) return;
+// SpeechRecognition は**1つのインスタンスを使い回す**。iOS Safari は毎回 new すると
+// 2回目以降 onresult が来ない既知の不具合があるため（＝2回目が記録されない対策）。
+function ensureRecog() {
+  if (recog) return recog;
   recog = new SR();
   recog.lang = "ja-JP";
   recog.continuous = true;
   recog.interimResults = true;
-  // 確認待ちのまま話し直したら、その未反映ぶんは取り消してメモを戻す
-  if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
-  voiceBase = document.getElementById("f-note").value.trim();
-  voiceFinal = "";
-  voiceStopping = false;
-  voiceSilent = false;
-
   recog.onresult = (e) => {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -876,15 +912,28 @@ function startVoice() {
     }
     finishVoice();
   };
+  return recog;
+}
 
+function startVoice() {
+  if (!voiceSupported || voiceActive) return;
+  // 確認待ちのまま話し直したら、その未反映ぶんは取り消してメモを戻す
+  if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
+  const r = ensureRecog();
+  voiceBase = document.getElementById("f-note").value.trim();
+  voiceFinal = "";
+  voiceStopping = false;
+  voiceSilent = false;
   try {
-    recog.start();
+    r.start();
     voiceActive = true;
     vBtn(true);
     vStatus("聞いています…（話し終わったら「停止」）");
   } catch {
+    // 直前のセッションが残っていれば一度 abort して気づける形にする
+    try { r.abort(); } catch {}
     voiceActive = false;
-    vStatus("音声を開始できませんでした（手入力をどうぞ）", true);
+    vStatus("もう一度「音声で入力」を押してください", true);
   }
 }
 

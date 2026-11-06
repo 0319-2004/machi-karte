@@ -40,6 +40,8 @@
       background:rgba(255,255,255,.9); padding:4px 8px; border-radius:10px; color:var(--sub); }
     #box-rect { position:absolute; z-index:5; border:2px solid var(--warn);
       background:rgba(142,36,170,.15); pointer-events:none; display:none; }
+    /* 範囲選択中はブラウザのスクロール/ズームを止めて指のドラッグを矩形に使う */
+    .mapwrap.box-on, .mapwrap.box-on #pick-map, .mapwrap.box-on #pick-map canvas { touch-action:none; }
 
     /* タップした棟の小情報 */
     #pick-info { position:absolute; left:8px; right:8px; bottom:8px; z-index:4;
@@ -181,6 +183,13 @@
     .m-ghost { border:1px solid var(--line); background:#fff; color:var(--sub); }
     .m-primary { border:none; background:var(--accent); color:#fff; }
 
+    /* 出力パネルのリンク */
+    .dl-links { display:flex; flex-direction:column; gap:8px; margin:6px 0 12px; }
+    .dl-links a, .dl-links button { display:block; text-align:center; text-decoration:none;
+      border:1px solid var(--accent); color:var(--accent); background:#fff; border-radius:9px;
+      padding:12px; font-size:15px; font-weight:700; }
+    .dl-links a.disabled, .dl-links button:disabled { opacity:.45; pointer-events:none; }
+
     /* 写真の確認・手塗り（黒塗り）エディタ */
     .redact-card { background:#fff; border-radius:14px; max-width:480px; width:100%;
       padding:14px; max-height:94vh; overflow:auto; box-shadow:0 8px 30px rgba(0,0,0,.35); }
@@ -212,7 +221,8 @@
   <div id="view-pick" class="view">
     <div class="bar">
       <h1>現地調査｜地図で選ぶ</h1>
-      <button id="toggle-list" class="ghost" title="リストから選ぶ（地図が重い端末向け）">リスト</button>
+      <button id="dl-open" class="ghost" title="確定済みから更新候補を出力">⬇ 出力</button>
+      <button id="toggle-list" class="ghost" title="リスト⇄地図を切り替える">リスト</button>
     </div>
     <div class="mapwrap">
       <div id="pick-map"></div>
@@ -318,6 +328,22 @@
     </div>
     <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
       target="_blank" rel="noopener">国土地理院（地理院タイル）</a></div>
+  </div>
+
+  <!-- 更新候補の出力（スマホから直接ダウンロード／生成） -->
+  <div id="dl-panel" class="modal hidden">
+    <div class="modal-card">
+      <h2>更新候補の出力</h2>
+      <p class="modal-note" id="dl-count">確定済みの棟から出力します。</p>
+      <div class="dl-links">
+        <a id="dl-csv" href="/api/export.csv" download>CSV をダウンロード</a>
+        <a id="dl-geojson" href="/api/export.geojson" download>GeoJSON をダウンロード</a>
+        <button type="button" id="dl-report">レポート（Markdown）を生成</button>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="dl-close" class="m-ghost">閉じる</button>
+      </div>
+    </div>
   </div>
 
   <!-- 写真の確認・手塗り（顔は自動ぼかし済み／指で黒塗り） -->
