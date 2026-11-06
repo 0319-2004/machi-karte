@@ -30,6 +30,17 @@ geojson:
 serve:
 	uv run uvicorn api.main:app --reload --port 8000
 
+# MediaPipe の WASM を取得（web/vendor/mediapipe/wasm/、git 管理外・各約9MB）。
+# 顔の自動ぼかしを使うなら一度だけ実行。未取得でも手塗りにフォールバックする。
+MP_VER ?= 0.10.18
+fetch-mediapipe:
+	@mkdir -p web/vendor/mediapipe/wasm
+	curl -sSL -o web/vendor/mediapipe/wasm/vision_wasm_internal.wasm \
+	  https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@$(MP_VER)/wasm/vision_wasm_internal.wasm
+	curl -sSL -o web/vendor/mediapipe/wasm/vision_wasm_nosimd_internal.wasm \
+	  https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@$(MP_VER)/wasm/vision_wasm_nosimd_internal.wasm
+	@echo "取得完了（web/vendor/mediapipe/wasm/）"
+
 # 既知棟での精度検証（階数の完全一致/±1階、用途ベースライン）
 eval:
 	uv run python -m eval.holdout

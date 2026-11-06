@@ -637,19 +637,18 @@ function fileToCanvas(file) {
 }
 
 // --- 顔の自動ぼかし（MediaPipe Face Detector, Apache-2.0） -------------------
-// 端末内で推論。モデル/WASM は CDN から初回だけ読み込みキャッシュ。非対応・失敗は
-// null を返して手塗りに進む（止まらない）。画像はどこにも送らない。
-const MP_VER = "0.10.18";
+// 端末内で推論。ローダ/WASM/モデルは CDN ではなく自サーバー（/vendor/mediapipe/）から
+// 読み込む＝デモ中に通信が不安定でも動く。WASM 未取得・非対応・失敗は null を返して
+// 手塗りに進む（止まらない）。画像はどこにも送らない。
+const MP_DIR = "/vendor/mediapipe";   // 配置は web/vendor/mediapipe/（make fetch-mediapipe）
 let faceDetectorPromise = null;
 function getFaceDetector() {
   if (faceDetectorPromise) return faceDetectorPromise;
   faceDetectorPromise = (async () => {
-    const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`);
-    const resolver = await vision.FilesetResolver.forVisionTasks(
-      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/wasm`);
+    const vision = await import(`${MP_DIR}/vision_bundle.mjs`);
+    const resolver = await vision.FilesetResolver.forVisionTasks(`${MP_DIR}/wasm`);
     return vision.FaceDetector.createFromOptions(resolver, {
-      baseOptions: { modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite" },
+      baseOptions: { modelAssetPath: `${MP_DIR}/blaze_face_short_range.tflite` },
       runningMode: "IMAGE",
     });
   })().catch(() => { faceDetectorPromise = null; return null; });  // 失敗は null（手塗りへ）

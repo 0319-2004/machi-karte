@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-11-06 MediaPipe をローカル配信に（CDN 依存をやめる）＋通し動作確認
+
+- 背景 / きっかけ：顔ぼかしのモデル/ローダ/WASM を CDN から読んでいた。デモ中に通信が不安定でも動くよう、自サーバーから配信する。
+- サイズ実測（`@mediapipe/tasks-vision@0.10.18`）：モデル `blaze_face_short_range.tflite` **約224KB**、`vision_bundle.mjs` 約137KB、WASM ローダ `.js` 各約200KB、**WASM 本体 `vision_wasm_internal.wasm` 約9.1MB／`nosimd` 約8.9MB**（合計約20MB）。
+- 判断：
+  - **小さいもの（モデル＋ローダ、合計約760KB）はリポジトリに入れる**（`web/vendor/mediapipe/`：`blaze_face_short_range.tflite`・`vision_bundle.mjs`・`wasm/*.js`）。ライセンスは **Apache-2.0**（© The MediaPipe Authors）で MIT・ODbL・CC BY-SA と整合。
+  - **大きい WASM（各約9MB）は git 管理外**（`.gitignore` に `web/vendor/mediapipe/wasm/*.wasm`）。`make fetch-mediapipe` で取得（CLAUDE.md「大きいデータはリポジトリに入れない」に沿う）。
+  - `web/survey.js` は CDN ではなく `/vendor/mediapipe/`（アプリの root 配信）から `import()`／WASM／モデルを読む。`.mjs`→`text/javascript`・`.wasm`→`application/wasm` は Python 3.12 の mimetypes が既定で返すため追加設定不要。
+  - 帰属：`docs/attribution.md` を「自サーバー配信」に更新、`web/vendor/mediapipe/README.md` にライセンス・取得手順を記載。
+- 動作確認（localhost、実ブラウザ＝Playwright＋Chrome）：
+  - **CDN 全遮断**（jsdelivr/googleapis を abort）でも顔検出が動作（「顔は自動で隠しました（1件）」）。読み込みは `/vendor/mediapipe/` の4ファイルのみ、CDN 要求 0 件。
+  - **通し（判断不能の3棟）**：①選択3棟→②音声「1階にコンビニがあった」→質問「地上は何階建てですか」→「3階です」→確認「階数：3階 を入力します」→反映で階数3、③写真で顔1件自動ぼかし＋手塗り、④3棟とも usage/storeys を source=onsite で確定、⑤画面から CSV・GeoJSON ダウンロード（各棟が current_value=9999/461→proposed に、evidence_url に写真）、⑥画面からレポート生成（Markdown）。アプリ由来のコンソールエラー無し（favicon 404 のみ）。
+  - 確認後、テストの3棟の確定・写真は削除してライブ DB を元に戻した（確定棟数 6→3）。
+- 影響範囲：`web/vendor/mediapipe/`（新規）、`web/survey.js`（読み込み元）、`.gitignore`・`Makefile`（WASM 取得）、`docs/attribution.md`。既存機能は不変。
+
 ## 2026-11-06 現地写真：顔の自動ぼかし（MediaPipe）＋手塗り（黒塗り）を実装
 
 - 背景 / きっかけ：前日の調査どおり、顔は MediaPipe で自動ぼかし、プレート等は手塗りで対応する方針で実装。画像は端末内処理・サーバーに送らない。
