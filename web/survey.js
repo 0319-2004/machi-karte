@@ -893,15 +893,25 @@ document.getElementById("nav-next").addEventListener("click", () => { if (idx < 
 // 音声は保存せず認識後テキストだけを扱う。非対応・拒否・失敗でも手入力は壊さない。
 const VLS = { consent: "mk.survey.voiceConsent" };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const voiceSupported = !!SR && window.isSecureContext;
+// iOS は Web Speech の連続利用が不安定（2回目以降 onresult が来ない WebKit 既知バグ）。
+// そのため iOS では Web Speech をやめ、OS 標準の音声入力（キーボードの🎤）で
+// メモ欄に話してもらい、「振り分け」で Claude に渡す。Android/PC は Web Speech のまま。
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const voiceWebSpeech = !!SR && window.isSecureContext && !isIOS;  // iOS 以外：Web Speech
+const voiceDictation = isIOS;                                     // iOS：OS標準の音声入力
+const voiceSupported = voiceWebSpeech || voiceDictation;          // どちらかで音声ツールを出す
 
-let recog = null;            // SpeechRecognition インスタンス（毎回つくり直す）
+let recog = null;            // SpeechRecognition インスタンス（1個を使い回す）
 let voiceErrored = false;    // 認識エラー（finishVoice でメッセージを消さないため）
 let voiceActive = false;     // 認識中
 let voiceStopping = false;   // 停止ボタン押下（onend で振り分けへ）
 let voiceSilent = false;     // 棟移動で止めた（振り分けず、メモも触らない）
 let voiceBase = "";          // 音声開始前のメモ（手入力を消さないため）
 let voiceFinal = "";         // 確定した認識テキストの蓄積（再開をまたいで保持）
+let voiceUsedOnce = false;   // 一度でも起動したか（iOS：2回目以降はマイクを作り直す）
+let voiceStarting = false;   // 起動処理中（プライミングの await 中の二重起動を防ぐ）
+let voiceNoteSnapshot = "";  // iOS 口述：開始時のメモ（新規に話したぶんの差分検出用）
 
 // 聞き返しのセッション状態（棟ごとにリセット）
 let vAsked = 0;              // これまで尋ねた質問数（3往復で打ち切り）
@@ -918,7 +928,8 @@ function vStatus(msg, isErr) {
 function vBtn(rec) {
   const b = document.getElementById("voice-btn");
   b.classList.toggle("rec", rec);
-  b.textContent = rec ? "■ 停止" : "🎤 音声で入力";
+  if (voiceDictation) b.textContent = rec ? "✓ 話し終えたら振り分け" : "🎤 音声で入力";
+  else b.textContent = rec ? "■ 停止" : "🎤 音声で入力";
 }
 function applyTranscript(interim) {
   // メモ欄 = 開始前メモ + 認識テキスト（確定 + 暫定）。手入力は保持。
@@ -927,9 +938,12 @@ function applyTranscript(interim) {
   document.getElementById("f-note").value = voiceBase + sep + spoken;
 }
 
-// SpeechRecognition は iOS 安定重視で **毎回つくり直し**、continuous=false（1発話ごと）。
-// 認識の状況・エラーを画面にそのまま出して、端末ごとの不調を見えるようにする。
-function makeRecog() {
+// SpeechRecognition は **1インスタンスを使い回す**（iOS Safari は毎回 new すると
+// 2回目以降 onresult が来ない既知不具合のため）。continuous=false で1発話ごと、
+// 自動再開はしない（iOS の continuous＋自動再開が不安定なため）。
+// 認識の状況・エラーは画面にそのまま出して、端末ごとの不調を見えるようにする。
+function ensureRecog() {
+  if (recog) return recog;
   const r = new SR();
   r.lang = "ja-JP";
   r.continuous = false;        // iOS 対策：1発話ごと（話し終わると自動で止まる）
@@ -960,34 +974,54 @@ function makeRecog() {
     if (msg) vStatus(msg, true);
   };
   r.onend = () => { finishVoice(); };   // continuous=false：再開せず確定へ
-  return r;
+  recog = r;
+  return recog;
 }
 
-function startVoice() {
-  if (!voiceSupported || voiceActive) return;
-  // 確認待ちのまま話し直したら、その未反映ぶんは取り消してメモを戻す
-  if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
-  // 前のインスタンスはハンドラを外してから abort（古い onend で finishVoice が走らないように）
-  if (recog) { try { recog.onstart = recog.onresult = recog.onerror = recog.onend = null; recog.abort(); } catch {} }
-  recog = makeRecog();
-  voiceBase = document.getElementById("f-note").value.trim();
-  voiceFinal = "";
-  voiceStopping = false;
-  voiceSilent = false;
-  voiceErrored = false;
+// iOS 対策：2回目以降は getUserMedia でマイクを一瞬だけ掴んで即解放し、
+// 録音セッションを作り直してから認識を開始する。これをしないと iOS Safari は
+// onstart は来るのに onresult が一度も来ず、2回目が全く録れない。
+async function primeMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  stream.getTracks().forEach((t) => t.stop());   // すぐ解放（録音はしない）
+  await new Promise((r) => setTimeout(r, 250));   // iOS が解放しきるのを待つ
+}
+
+async function startVoice() {
+  if (!voiceSupported || voiceActive || voiceStarting) return;
+  voiceStarting = true;
   try {
-    recog.start();
+    // 確認待ちのまま話し直したら、その未反映ぶんは取り消してメモを戻す
+    if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
+    const r = ensureRecog();     // 使い回し（iOS で2回目以降が録れなくなるのを防ぐ）
+    voiceBase = document.getElementById("f-note").value.trim();
+    voiceFinal = "";
+    voiceStopping = false;
+    voiceSilent = false;
+    voiceErrored = false;
+    if (voiceUsedOnce) {          // 初回は権限プロンプトのためジェスチャ内でそのまま start
+      vStatus("🎤 マイク準備中…");
+      await primeMic();
+    }
+    r.start();
+    voiceUsedOnce = true;
     voiceActive = true;
     vBtn(true);
     vStatus("🎤 起動中…");
   } catch (err) {
+    // 直前のセッションが残っていれば abort して次回に備える
+    try { recog && recog.abort(); } catch {}
     voiceActive = false;
     vStatus(`音声を開始できませんでした：${(err && err.name) || err}`, true);
+  } finally {
+    voiceStarting = false;
   }
 }
 
 function stopVoice(silent) {
   if (!voiceActive) return;
+  if (voiceDictation) { voiceActive = false; vBtn(false); return; }  // 口述：振り分けず閉じるだけ
   voiceStopping = true;
   voiceActive = false;
   voiceSilent = !!silent;        // 棟移動で止めたときは振り分けずメモも触らない
@@ -1100,10 +1134,39 @@ async function finishVoice() {
   saveDraft();             // ここまでの文字は必ず端末に残す
   const text = voiceFinal.trim();
   if (!text) { vStatus("聞き取れませんでした。もう一度『音声で入力』を押して話してください", true); return; }
+  await dispatchSpoken(text, voiceBase);   // この発話前のメモ（voiceBase）を反映/やり直しの基準に
+}
 
+// iOS 口述：メモ欄にキーボードの🎤で話してもらう。開始時にメモを控え、
+// 「振り分け」を押したら新規に話したぶんだけを取り出して Claude に渡す。
+function startDictation() {
+  if (voiceActive) return;
+  if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
+  const ta = document.getElementById("f-note");
+  voiceNoteSnapshot = ta.value;            // 新規ぶんの差分検出用（生の値）
+  voiceBase = voiceNoteSnapshot.trim();    // 反映/やり直しで戻す基準
+  voiceActive = true;
+  vBtn(true);
+  vStatus("メモ欄で、キーボードの🎤を押して話してください。終わったら「振り分け」を押します");
+  ta.focus();
+  try { const n = ta.value.length; ta.setSelectionRange(n, n); } catch {}  // 末尾に追記されるように
+}
+async function finishDictation() {
+  voiceActive = false;
+  vBtn(false);
+  saveDraft();
+  const full = document.getElementById("f-note").value;
+  // 開始時のメモを前置きとして取り除き、新規に話したぶんだけを振り分ける
+  let text = full.startsWith(voiceNoteSnapshot) ? full.slice(voiceNoteSnapshot.length) : full;
+  text = text.trim();
+  if (!text) { vStatus("メモに文字がありません。キーボードの🎤で話してから「振り分け」を押してください", true); return; }
+  await dispatchSpoken(text, voiceBase);
+}
+
+// 認識/口述で得たテキストを Claude に振り分け、確認（反映前）まで進める。
+async function dispatchSpoken(text, base) {
   vStatus("内容を振り分け中…");
   const askedPending = vPending;   // この発話が答えている質問の項目
-  const base = voiceBase;          // この発話前のメモ（反映/やり直しで戻す基準）
   try {
     const res = await fetch("/api/voice_parse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1131,7 +1194,10 @@ async function finishVoice() {
       vAsked += 1;
       showQuestion(d.question, d.question_target);
       vStatus("質問にお答えください（🎤 か手入力）");
-    } else {                           // 入れる欄も質問も無い
+    } else if (d.features) {           // 用途・階数には当てはまらなかった（メモに残っている）
+      hideQuestion();
+      vStatus("用途・階数には反映できませんでした。話した内容はメモに残しています");
+    } else {                           // 入れる欄も質問も無い＝確認完了
       hideQuestion();
       vStatus(doneStatus());
     }
@@ -1143,17 +1209,20 @@ async function finishVoice() {
   }
 }
 
+// 端末に応じて開始する：iOS は OS 標準の口述、それ以外は Web Speech
+function startEntry() { if (voiceDictation) startDictation(); else startVoice(); }
+
 if (voiceSupported) {
   document.getElementById("voice-tools").classList.remove("hidden");
   document.getElementById("voice-btn").addEventListener("click", () => {
-    if (voiceActive) { stopVoice(false); return; }
-    if (lsGet(VLS.consent, false)) startVoice();
+    if (voiceActive) { voiceDictation ? finishDictation() : stopVoice(false); return; }
+    if (lsGet(VLS.consent, false)) startEntry();
     else document.getElementById("voice-consent").classList.remove("hidden");
   });
   document.getElementById("voice-ok").addEventListener("click", () => {
     lsSet(VLS.consent, true);
     document.getElementById("voice-consent").classList.add("hidden");
-    startVoice();
+    startEntry();
   });
   document.getElementById("voice-cancel").addEventListener("click", () =>
     document.getElementById("voice-consent").classList.add("hidden"));
