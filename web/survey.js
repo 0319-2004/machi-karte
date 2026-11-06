@@ -562,7 +562,7 @@ async function loadBuilding(i) {
     draft && draft.storeys != null && draft.storeys !== "" ? draft.storeys
       : (estStoreys != null ? estStoreys : "");
   document.getElementById("f-note").value = (draft && draft.note) || "";
-  setPhoto(draft && draft.photo);
+  setPhoto(draft && draft.photo, draft ? draft.photo_faces : null);
   document.getElementById("saved-flag").classList.toggle("hidden", !draft);
 
   const saveBtn = document.getElementById("nav-save");
@@ -581,6 +581,7 @@ function readForm() {
     storeys: st === "" ? null : Math.max(1, parseInt(st, 10) || 0) || null,
     note: document.getElementById("f-note").value.trim() || null,
     photo: currentPhoto,
+    photo_faces: currentPhotoFaces,
   };
 }
 function saveDraft() {
@@ -604,19 +605,23 @@ function onFieldInput() {
 for (const elid of ["f-usage", "f-storeys", "f-note"])
   document.getElementById(elid).addEventListener("input", onFieldInput);
 
-// 写真（カメラ→端末側で縮小）
+// 写真（カメラ→端末内で縮小→顔を自動ぼかし→手塗り確認→加工後だけ保存）
+// 画像はサーバーに送らず端末内で処理する。元画像は端末にも残さない（currentPhoto は加工後のみ）。
 let currentPhoto = null;
-function setPhoto(dataUrl) {
+let currentPhotoFaces = null;     // 自動ぼかしした顔の件数（未対応なら null）
+function setPhoto(dataUrl, faces) {
   currentPhoto = dataUrl || null;
+  currentPhotoFaces = currentPhoto ? (faces == null ? null : faces) : null;
   const thumb = document.getElementById("photo-thumb");
   const del = document.getElementById("photo-del");
   const note = document.getElementById("photo-note");
   if (currentPhoto) { thumb.src = currentPhoto; thumb.style.display = "inline"; del.classList.remove("hidden"); }
   else { thumb.removeAttribute("src"); thumb.style.display = "none"; del.classList.add("hidden"); }
-  // 写真を付けたら注意書きを強調（人・ナンバー・表札の写り込み確認）
   if (note) note.classList.toggle("alert", !!currentPhoto);
 }
-function downscale(file) {
+
+// ファイル → 端末内で縮小したキャンバス（元画像はここから外に出さない）
+function fileToCanvas(file) {
   return new Promise((resolve, reject) => {
     const img = new Image(); const url = URL.createObjectURL(file);
     img.onload = () => {
@@ -624,18 +629,140 @@ function downscale(file) {
       const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
       const c = document.createElement("canvas"); c.width = w; c.height = h;
       c.getContext("2d").drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url); resolve(c.toDataURL("image/jpeg", 0.7));
+      URL.revokeObjectURL(url); resolve(c);
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("画像を読めません")); };
     img.src = url;
   });
 }
+
+// --- 顔の自動ぼかし（MediaPipe Face Detector, Apache-2.0） -------------------
+// 端末内で推論。モデル/WASM は CDN から初回だけ読み込みキャッシュ。非対応・失敗は
+// null を返して手塗りに進む（止まらない）。画像はどこにも送らない。
+const MP_VER = "0.10.18";
+let faceDetectorPromise = null;
+function getFaceDetector() {
+  if (faceDetectorPromise) return faceDetectorPromise;
+  faceDetectorPromise = (async () => {
+    const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`);
+    const resolver = await vision.FilesetResolver.forVisionTasks(
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/wasm`);
+    return vision.FaceDetector.createFromOptions(resolver, {
+      baseOptions: { modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite" },
+      runningMode: "IMAGE",
+    });
+  })().catch(() => { faceDetectorPromise = null; return null; });  // 失敗は null（手塗りへ）
+  return faceDetectorPromise;
+}
+// 領域をモザイク化（ぼかし。canvas filter 非対応端末でも効く＝縮小→拡大）
+function pixelate(ctx, src, x, y, w, h) {
+  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  if (w <= 0 || h <= 0) return;
+  const blocks = 9;
+  const tmp = document.createElement("canvas"); tmp.width = blocks; tmp.height = blocks;
+  tmp.getContext("2d").drawImage(src, x, y, w, h, 0, 0, blocks, blocks);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, blocks, blocks, x, y, w, h);
+  ctx.imageSmoothingEnabled = true;
+}
+// 検出した顔（少し広げて）をぼかす。検出数を返す。-1 は自動ぼかし未実施。
+async function autoBlurFaces(canvas) {
+  const detector = await getFaceDetector();
+  if (!detector) return -1;
+  let dets;
+  try { dets = (detector.detect(canvas).detections) || []; }
+  catch { return -1; }
+  const ctx = canvas.getContext("2d");
+  for (const d of dets) {
+    const b = d.boundingBox; if (!b) continue;
+    const ex = b.width * 0.3, ey = b.height * 0.35;
+    const x = Math.max(0, b.originX - ex), y = Math.max(0, b.originY - ey);
+    const w = Math.min(canvas.width - x, b.width + 2 * ex);
+    const h = Math.min(canvas.height - y, b.height + 2 * ey);
+    pixelate(ctx, canvas, x, y, w, h);
+  }
+  return dets.length;
+}
+
+// --- 手塗り（黒塗り）エディタ -----------------------------------------------
+let edBase = null;        // 自動ぼかし済みの土台キャンバス
+let edStrokes = [];       // [{w, pts:[{x,y}...]}, ...]
+let edWidth = 18, edFaces = null, edDrawing = false;
+function edRender() {
+  const cv = document.getElementById("redact-canvas");
+  const ctx = cv.getContext("2d");
+  ctx.drawImage(edBase, 0, 0);
+  ctx.strokeStyle = "#000"; ctx.fillStyle = "#000";
+  ctx.lineJoin = ctx.lineCap = "round";
+  for (const s of edStrokes) {
+    if (s.pts.length === 1) { ctx.beginPath();
+      ctx.arc(s.pts[0].x, s.pts[0].y, s.w / 2, 0, Math.PI * 2); ctx.fill(); continue; }
+    ctx.lineWidth = s.w; ctx.beginPath();
+    ctx.moveTo(s.pts[0].x, s.pts[0].y);
+    for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i].x, s.pts[i].y);
+    ctx.stroke();
+  }
+}
+function edPoint(ev) {
+  const cv = document.getElementById("redact-canvas");
+  const r = cv.getBoundingClientRect();
+  return { x: (ev.clientX - r.left) * (cv.width / r.width),
+           y: (ev.clientY - r.top) * (cv.height / r.height) };
+}
+function openRedactEditor(baseCanvas, faces) {
+  edBase = baseCanvas; edStrokes = []; edFaces = faces;
+  const cv = document.getElementById("redact-canvas");
+  cv.width = baseCanvas.width; cv.height = baseCanvas.height;
+  edRender();
+  document.getElementById("redact-msg").textContent = faces >= 0
+    ? `顔は自動で隠しました（${faces}件）。ナンバープレート・表札・人が写っていないか確認し、必要なら指で塗ってください。`
+    : "この端末では顔の自動ぼかしが使えません。顔・ナンバープレート・表札・人が写っていないか確認し、指で塗ってください。";
+  document.getElementById("redact").classList.remove("hidden");
+}
+function closeRedactEditor() {
+  document.getElementById("redact").classList.add("hidden");
+  edBase = null; edStrokes = [];   // 元画像を含め端末に残さない
+}
+
 document.getElementById("f-photo").addEventListener("change", async (e) => {
-  const file = e.target.files && e.target.files[0]; if (!file) return;
-  try { setPhoto(await downscale(file)); saveDraft(); } catch { showErr("写真を読み込めませんでした"); }
-  e.target.value = "";
+  const file = e.target.files && e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  try {
+    const canvas = await fileToCanvas(file);     // 端末内で縮小
+    const faces = await autoBlurFaces(canvas);    // 端末内で顔ぼかし（非対応は -1）
+    openRedactEditor(canvas, faces);              // 確認＋手塗り
+  } catch { showErr("写真を読み込めませんでした"); }
 });
 document.getElementById("photo-del").addEventListener("click", () => { setPhoto(null); saveDraft(); });
+
+// 手塗りの操作
+(function wireRedact() {
+  const cv = document.getElementById("redact-canvas");
+  const start = (ev) => { edDrawing = true; edStrokes.push({ w: edWidth, pts: [edPoint(ev)] }); edRender(); ev.preventDefault(); };
+  const move = (ev) => { if (!edDrawing) return; edStrokes[edStrokes.length - 1].pts.push(edPoint(ev)); edRender(); ev.preventDefault(); };
+  const end = () => { edDrawing = false; };
+  cv.addEventListener("pointerdown", start);
+  cv.addEventListener("pointermove", move);
+  cv.addEventListener("pointerup", end);
+  cv.addEventListener("pointercancel", end);
+  cv.addEventListener("pointerleave", end);
+  for (const b of document.querySelectorAll(".rt-w"))
+    b.addEventListener("click", () => {
+      edWidth = Number(b.dataset.w);
+      document.querySelectorAll(".rt-w").forEach((x) => x.classList.toggle("on", x === b));
+    });
+  document.getElementById("redact-undo").addEventListener("click", () => { edStrokes.pop(); edRender(); });
+  document.getElementById("redact-cancel").addEventListener("click", closeRedactEditor);
+  document.getElementById("redact-done").addEventListener("click", () => {
+    edRender();
+    const dataUrl = document.getElementById("redact-canvas").toDataURL("image/jpeg", 0.7);
+    const faces = edFaces;
+    closeRedactEditor();
+    setPhoto(dataUrl, faces >= 0 ? faces : null);
+    saveDraft();
+  });
+})();
 
 // 送信
 function showErr(msg) {

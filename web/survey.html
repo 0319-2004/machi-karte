@@ -181,6 +181,21 @@
     .m-ghost { border:1px solid var(--line); background:#fff; color:var(--sub); }
     .m-primary { border:none; background:var(--accent); color:#fff; }
 
+    /* 写真の確認・手塗り（黒塗り）エディタ */
+    .redact-card { background:#fff; border-radius:14px; max-width:480px; width:100%;
+      padding:14px; max-height:94vh; overflow:auto; box-shadow:0 8px 30px rgba(0,0,0,.35); }
+    .redact-msg { margin:0 0 10px; font-size:13px; line-height:1.6; color:#c62828; font-weight:600; }
+    .redact-stage { background:#222; border-radius:8px; display:flex; justify-content:center; }
+    #redact-canvas { max-width:100%; height:auto; display:block; border-radius:8px; touch-action:none; }
+    .redact-tools { display:flex; align-items:center; gap:6px; margin:10px 0; flex-wrap:wrap;
+      font-size:13px; color:var(--sub); }
+    .redact-tools button { border:1px solid var(--line); background:#fff; border-radius:8px;
+      padding:7px 11px; font-size:13px; }
+    .redact-tools .rt-w.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+    #redact-undo { margin-left:auto; }
+    .redact-actions { display:flex; gap:8px; }
+    .redact-actions button { flex:1; border-radius:9px; padding:12px; font-size:15px; font-weight:700; }
+
     .saved-flag { font-size:12px; color:var(--ok); } .err { font-size:12px; color:#c62828; }
     .nav { display:flex; gap:8px; padding:8px var(--pad); border-top:1px solid var(--line); background:var(--bg); }
     .nav .side { flex:none; width:52px; border:1px solid var(--line); background:#fff;
@@ -303,6 +318,25 @@
     </div>
     <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
       target="_blank" rel="noopener">国土地理院（地理院タイル）</a></div>
+  </div>
+
+  <!-- 写真の確認・手塗り（顔は自動ぼかし済み／指で黒塗り） -->
+  <div id="redact" class="modal hidden">
+    <div class="redact-card">
+      <p class="redact-msg" id="redact-msg"></p>
+      <div class="redact-stage"><canvas id="redact-canvas"></canvas></div>
+      <div class="redact-tools">
+        <span>太さ</span>
+        <button type="button" class="rt-w on" data-w="18">細</button>
+        <button type="button" class="rt-w" data-w="36">中</button>
+        <button type="button" class="rt-w" data-w="64">太</button>
+        <button type="button" id="redact-undo">やり直す</button>
+      </div>
+      <div class="redact-actions">
+        <button type="button" id="redact-cancel" class="m-ghost">キャンセル</button>
+        <button type="button" id="redact-done" class="m-primary">この画像を使う</button>
+      </div>
+    </div>
   </div>
 
   <!-- 音声入力の同意（初回だけ・試験的） -->

@@ -355,15 +355,19 @@ class SurveyBody(BaseModel):
     storeys: int | None = None        # 現地で数えた地上階数
     note: str | None = None           # 自由記述メモ
     operator: str | None = None       # 調査担当者
-    photo: str | None = None          # data URL（base64, 端末側で縮小済み）。無くてよい
+    photo: str | None = None          # data URL（base64, 端末側で縮小＋顔ぼかし済み）。無くてよい
+    photo_faces: int | None = None    # 端末内で自動ぼかしした顔の件数（未対応なら null）
 
 
 def _save_survey_photo(con, building_id: str, photo: str,
-                       operator: str | None = None) -> dict | None:
+                       operator: str | None = None,
+                       faces: int | None = None) -> dict | None:
     """data URL の写真を data/survey/ に保存し、evidence(kind='photo') に紐づける。
 
     撮影日は evidence.created_at（サーバー側の時計）を正本にし、撮影者（operator）は
     detail に残す（写真のみの登録で confirmations が無くても撮影者を辿れるように）。
+    端末内で自動ぼかしした顔の件数（faces）も detail に残す。画像は既に加工済みで届く
+    （元画像はサーバーに送られない）。
     """
     m = re.match(r"^data:(image/(?:jpeg|png|webp));base64,(.+)$", photo, re.DOTALL)
     if not m:
@@ -390,7 +394,8 @@ def _save_survey_photo(con, building_id: str, photo: str,
         "VALUES (?, ?, ?, 'photo', ?, ?)",
         [eid, building_id, VERSION, "現地写真", json.dumps(
             {"source": "onsite", "filename": fname, "url": url,
-             "operator": (operator or "").strip() or None}, ensure_ascii=False)],
+             "operator": (operator or "").strip() or None,
+             "faces_blurred": faces}, ensure_ascii=False)],
     )
     return {"evidence_id": eid, "url": url}
 
@@ -440,7 +445,8 @@ def survey(body: SurveyBody) -> dict:
         cands = _candidates_for(con, building_id)
         photo_info = None
         if body.photo:
-            photo_info = _save_survey_photo(con, building_id, body.photo, body.operator)
+            photo_info = _save_survey_photo(con, building_id, body.photo,
+                                            body.operator, body.photo_faces)
 
         opened_sql = ("COALESCE((SELECT opened_at FROM open_events "
                       "WHERE version=? AND building_id=?), now())")

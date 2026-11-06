@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-11-06 現地写真：顔の自動ぼかし（MediaPipe）＋手塗り（黒塗り）を実装
+
+- 背景 / きっかけ：前日の調査どおり、顔は MediaPipe で自動ぼかし、プレート等は手塗りで対応する方針で実装。画像は端末内処理・サーバーに送らない。
+- 実装（`web/survey.js` / `survey.html`）：
+  - **顔の自動ぼかし**：撮影（ファイル選択）→端末内で縮小→**MediaPipe Face Detector（`@mediapipe/tasks-vision`、Apache-2.0、BlazeFace short-range）** で顔検出→各顔をモザイク化（縮小→拡大。canvas filter 非対応でも効く）。モデル/WASM は jsdelivr＋googleapis から**初回だけ**読み込み（`import()` を1度だけ、`faceDetectorPromise` で保持）。**検出失敗・非対応は `-1` を返して手塗りへ進む（止まらない）**。
+  - **手塗り（確認画面）**：自動ぼかし後に全画面エディタを出し、指でなぞって**黒く塗りつぶし**（ぼかしでなく塗りつぶし＝復元不可）。太さ3段階、やり直す（直前のストローク取り消し）。土台＝自動ぼかし済み画像＋ストローク配列を都度再描画。メッセージ「顔は自動で隠しました（N件）。ナンバープレート・表札・人が…必要なら指で塗ってください」（非対応時は「この端末では顔の自動ぼかしが使えません…」）。
+  - **保存**：「この画像を使う」で加工後の canvas を `toDataURL` し、それだけを `currentPhoto` に。**元画像は端末にも残さない**（`currentPhoto` は加工後のみ、土台 canvas は閉じるとき破棄）。
+  - **顔件数の記録**：`photo_faces` を `/api/survey` へ送り、`_save_survey_photo` が evidence(kind='photo') の detail に `faces_blurred` として残す（`api/main.py`）。非対応時は null。
+  - 制約どおり：**画像はサーバーに送らず端末内で処理**／非対応端末は自動ぼかしを飛ばして手塗りのみ／`docs/attribution.md` に MediaPipe（Apache-2.0）を追記（`/attribution` 画面にも反映）。
+- 動作確認（localhost、実ブラウザ＝Playwright＋Chrome。PD顔画像で検証）：
+  - **対応端末**：顔1件を検出・ぼかし→「顔は自動で隠しました（1件）」。手塗りで canvas が変化、やり直すで土台に復元。「この画像を使う」で下書きに**加工後画像＋`photo_faces=1`**。編集〜確定の間、**自画像のサーバー送信は 0 件**（モデルは CDN から取得）。アプリ由来のコンソールエラー無し（favicon 404 と MediaPipe の TFLite INFO ログのみ）。
+  - **非対応端末（CDN遮断）**：「この端末では顔の自動ぼかしが使えません…」→手塗りのみで画像生成、`photo_faces=null`。
+  - **サーバー保存**：写真のみ POST→ evidence.detail に `faces_blurred: 2` を記録（確認後テスト痕跡は削除）。
+- 影響範囲：現地写真の撮影経路（`web/survey.*`）と `api/main.py`（`SurveyBody.photo_faces`・`_save_survey_photo`）。日本のナンバープレート自動検出は前日調査どおり見送り（手塗りで対応）。
+
 ## 2026-11-06 調査：ブラウザ内の顔・ナンバープレート検出OSS（実装はまだしない）
 
 - 背景 / きっかけ：現地写真や Mapillary 画像の顔・ナンバープレートを、**サーバーに送らず端末内で**ぼかしたい。使えるOSSを調べ、半日で組み込めるか判断する（実装はしない）。CLAUDE.md の Mapillary 規約＝「ぼかし解除・再識別はしない」。ここで作るのは逆向き（ぼかしを足す）なので整合。
