@@ -35,13 +35,14 @@
     .pick-tools button { pointer-events:auto; border:none; border-radius:18px; padding:8px 13px;
       font-size:13px; font-weight:700; background:#fff; color:var(--ink);
       box-shadow:0 2px 6px rgba(0,0,0,.25); }
-    .pick-tools #box-toggle.on { background:var(--warn); color:#fff; }
+    .pick-tools #box-toggle.on, .pick-tools #lasso-toggle.on { background:var(--warn); color:#fff; }
     .pick-tools #shown-count { pointer-events:none; margin-left:auto; font-size:12px;
       background:rgba(255,255,255,.9); padding:4px 8px; border-radius:10px; color:var(--sub); }
     #box-rect { position:absolute; z-index:5; border:2px solid var(--warn);
       background:rgba(142,36,170,.15); pointer-events:none; display:none; }
     /* 範囲選択中はブラウザのスクロール/ズームを止めて指のドラッグを矩形に使う */
     .mapwrap.box-on, .mapwrap.box-on #pick-map, .mapwrap.box-on #pick-map canvas { touch-action:none; }
+    #lasso-canvas { position:absolute; inset:0; z-index:5; pointer-events:none; display:none; }
 
     /* タップした棟の小情報 */
     #pick-info { position:absolute; left:8px; right:8px; bottom:8px; z-index:4;
@@ -227,8 +228,10 @@
     <div class="mapwrap">
       <div id="pick-map"></div>
       <div id="box-rect"></div>
+      <canvas id="lasso-canvas"></canvas>
       <div class="pick-tools">
-        <button id="box-toggle" title="指でドラッグした範囲の棟をまとめて選ぶ">範囲で選択</button>
+        <button id="box-toggle" title="四角で囲んで選ぶ（もう一度同じ所を囲むと解除）">■ 範囲</button>
+        <button id="lasso-toggle" title="指でなぞって囲んで選ぶ（もう一度囲むと解除）">✎ なぞる</button>
         <button id="more-btn">もっと表示</button>
         <span id="shown-count"></span>
       </div>

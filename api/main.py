@@ -606,8 +606,11 @@ def report_md(city_code: str = "13104") -> Response:
         f.write(md)
     report_append_log(facts, meta.get("model") or "(skipped)", meta)
 
+    # 先頭に UTF-8 BOM を付ける。スマホ（iOS）で保存して開くと、HTTP の charset が
+    # 効かず別の文字コードと誤認して文字化けするため（CSV と同様に BOM で UTF-8 を明示）。
     return Response(
-        content=md.encode("utf-8"), media_type="text/markdown; charset=utf-8",
+        content=b"\xef\xbb\xbf" + md.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="report_{city_code}.md"'},
     )
 

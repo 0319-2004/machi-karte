@@ -36,7 +36,7 @@ let displayLimit = 100;           // 地図に出す上位N（「もっと表示
 let targetTotal = 0;
 
 let pickMap = null, planMap = null;
-let boxMode = false;
+let selMode = null;   // 範囲選択モード："box"（四角）| "lasso"（なぞる）| null
 
 // プラン/入力
 let mode = "priority";            // priority | near
@@ -114,7 +114,7 @@ function initPickMap() {
     pickMap.on("mouseleave", "tg-dot", () => pickMap.getCanvas().style.cursor = "");
     updateShownCount();
   });
-  setupBoxSelect();
+  setupRegionSelect();
 }
 
 function selColorExpr() {
@@ -164,58 +164,106 @@ function showPickInfo(id) {
   el.querySelector(".pi-toggle").addEventListener("click", () => { toggleSelect(id); showPickInfo(id); });
 }
 
-// 範囲で選択（指でドラッグ）：ドラッグ中はパンを止め、矩形内の表示中の棟を選ぶ
-function setupBoxSelect() {
+// 範囲で選択（四角＝範囲 / 指でなぞる＝鉛筆）。モード中は地図のジェスチャを止める。
+// 囲んだ中の棟を選ぶが、**全部すでに選択済みなら解除**（同じ所を2度囲むと消える）。
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function applyRegionSelection(ids) {
+  if (!ids.length) return;
+  // 囲んだ中の半数以上がすでに選択済みなら「まとめて解除」（同じ所を2度囲むと消える）。
+  // 半数以上を基準にするのは、2度目に少しズレて囲んでも確実に解除できるようにするため。
+  const sel = ids.filter((id) => selected.includes(id)).length;
+  if (sel * 2 >= ids.length) {
+    selected = selected.filter((id) => !ids.includes(id));
+  } else {                                             // それ以外は未選択を追加
+    for (const id of ids) if (!selected.includes(id)) selected.push(id);
+  }
+  lsSet(LS.selected, selected); paintSel(); updateSelbar(); renderPickList();
+}
+function setupRegionSelect() {
   const wrap = document.querySelector("#view-pick .mapwrap");
   const rect = document.getElementById("box-rect");
-  let start = null;
+  const cv = document.getElementById("lasso-canvas");
+  let start = null, path = null;
   const pt = (ev) => { const r = wrap.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
 
-  document.getElementById("box-toggle").addEventListener("click", (e) => {
-    boxMode = !boxMode;
-    e.currentTarget.classList.toggle("on", boxMode);
-    wrap.classList.toggle("box-on", boxMode);   // touch-action:none でスクロール/ズームを止める
-    // 指のドラッグを矩形に使うため、地図側のジェスチャを全部止める（スマホ対策）
-    const g = [pickMap.dragPan, pickMap.touchZoomRotate, pickMap.touchPitch, pickMap.doubleClickZoom];
-    g.forEach((h) => h && (boxMode ? h.disable() : h.enable()));
-  });
+  function setMode(mode) {
+    selMode = selMode === mode ? null : mode;          // 同じボタンで切替、排他
+    document.getElementById("box-toggle").classList.toggle("on", selMode === "box");
+    document.getElementById("lasso-toggle").classList.toggle("on", selMode === "lasso");
+    wrap.classList.toggle("box-on", selMode !== null); // touch-action:none
+    const on = selMode !== null;
+    // 指のドラッグを選択に使うため、地図側のジェスチャを全部止める（スマホ対策）
+    [pickMap.dragPan, pickMap.touchZoomRotate, pickMap.touchPitch, pickMap.doubleClickZoom]
+      .forEach((h) => h && (on ? h.disable() : h.enable()));
+    start = null; path = null; rect.style.display = "none"; cv.style.display = "none";
+  }
+  document.getElementById("box-toggle").addEventListener("click", () => setMode("box"));
+  document.getElementById("lasso-toggle").addEventListener("click", () => setMode("lasso"));
+
+  const idsInBox = (x0, y0, x1, y1) => shownTargets()
+    .filter((t) => { const s = pickMap.project([t.lon, t.lat]); return s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1; })
+    .map((t) => t.id);
+  const idsInPoly = (poly) => shownTargets()
+    .filter((t) => { const s = pickMap.project([t.lon, t.lat]); return pointInPoly(s.x, s.y, poly); })
+    .map((t) => t.id);
+  function drawLasso() {
+    const ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    if (!path || path.length < 2) return;
+    ctx.fillStyle = "rgba(142,36,170,.14)"; ctx.strokeStyle = "#8e24aa";
+    ctx.lineWidth = 2.5; ctx.lineJoin = ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
 
   wrap.addEventListener("pointerdown", (ev) => {
-    if (!boxMode) return;
+    if (!selMode) return;
+    // ツールバー/情報カードのボタンは素通し（押しても選択を始めない＝モード切替が効く）
+    if (ev.target.closest && ev.target.closest(".pick-tools, #pick-info")) return;
     ev.preventDefault();
-    try { wrap.setPointerCapture(ev.pointerId); } catch {}   // 指が外れても追従
-    start = pt(ev);
-    rect.style.display = "block";
-    rect.style.left = start.x + "px"; rect.style.top = start.y + "px";
-    rect.style.width = "0px"; rect.style.height = "0px";
+    try { wrap.setPointerCapture(ev.pointerId); } catch {}
+    const p = pt(ev);
+    if (selMode === "box") {
+      start = p; rect.style.display = "block";
+      rect.style.left = p.x + "px"; rect.style.top = p.y + "px"; rect.style.width = "0px"; rect.style.height = "0px";
+    } else {
+      path = [p]; cv.width = wrap.clientWidth; cv.height = wrap.clientHeight; cv.style.display = "block";
+    }
   });
   wrap.addEventListener("pointermove", (ev) => {
-    if (!boxMode || !start) return;
-    ev.preventDefault();
-    const p = pt(ev);
-    rect.style.left = Math.min(start.x, p.x) + "px";
-    rect.style.top = Math.min(start.y, p.y) + "px";
-    rect.style.width = Math.abs(p.x - start.x) + "px";
-    rect.style.height = Math.abs(p.y - start.y) + "px";
+    if (!selMode) return;
+    if (selMode === "box" && start) {
+      ev.preventDefault(); const p = pt(ev);
+      rect.style.left = Math.min(start.x, p.x) + "px"; rect.style.top = Math.min(start.y, p.y) + "px";
+      rect.style.width = Math.abs(p.x - start.x) + "px"; rect.style.height = Math.abs(p.y - start.y) + "px";
+    } else if (selMode === "lasso" && path) {
+      ev.preventDefault(); path.push(pt(ev)); drawLasso();
+    }
   });
   const finish = (ev) => {
-    if (!boxMode || !start) return;
-    const p = pt(ev);
-    const x0 = Math.min(start.x, p.x), x1 = Math.max(start.x, p.x);
-    const y0 = Math.min(start.y, p.y), y1 = Math.max(start.y, p.y);
-    start = null; rect.style.display = "none";
-    if (x1 - x0 < 6 && y1 - y0 < 6) return;   // タップ扱い（誤爆回避）
-    let added = 0;
-    for (const t of shownTargets()) {
-      const s = pickMap.project([t.lon, t.lat]);
-      if (s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1 && !selected.includes(t.id)) {
-        selected.push(t.id); added++;
-      }
+    if (!selMode) return;
+    if (selMode === "box" && start) {
+      const p = pt(ev);
+      const x0 = Math.min(start.x, p.x), x1 = Math.max(start.x, p.x);
+      const y0 = Math.min(start.y, p.y), y1 = Math.max(start.y, p.y);
+      start = null; rect.style.display = "none";
+      if (x1 - x0 < 6 && y1 - y0 < 6) return;        // タップ扱い（誤爆回避）
+      applyRegionSelection(idsInBox(x0, y0, x1, y1));
+    } else if (selMode === "lasso" && path) {
+      const poly = path; path = null; cv.style.display = "none";
+      if (poly.length >= 3) applyRegionSelection(idsInPoly(poly));
     }
-    if (added) { lsSet(LS.selected, selected); paintSel(); updateSelbar(); renderPickList(); }
   };
   wrap.addEventListener("pointerup", finish);
-  wrap.addEventListener("pointercancel", () => { start = null; rect.style.display = "none"; });
+  wrap.addEventListener("pointercancel", () => { start = null; path = null; rect.style.display = "none"; cv.style.display = "none"; });
 }
 
 // リストからの選択（地図が重い端末向け）
