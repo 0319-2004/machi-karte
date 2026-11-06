@@ -895,7 +895,8 @@ const VLS = { consent: "mk.survey.voiceConsent" };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const voiceSupported = !!SR && window.isSecureContext;
 
-let recog = null;            // SpeechRecognition インスタンス（使い回す）
+let recog = null;            // SpeechRecognition インスタンス（毎回つくり直す）
+let voiceErrored = false;    // 認識エラー（finishVoice でメッセージを消さないため）
 let voiceActive = false;     // 認識中
 let voiceStopping = false;   // 停止ボタン押下（onend で振り分けへ）
 let voiceSilent = false;     // 棟移動で止めた（振り分けず、メモも触らない）
@@ -926,62 +927,62 @@ function applyTranscript(interim) {
   document.getElementById("f-note").value = voiceBase + sep + spoken;
 }
 
-// SpeechRecognition は**1つのインスタンスを使い回す**。iOS Safari は毎回 new すると
-// 2回目以降 onresult が来ない既知の不具合があるため（＝2回目が記録されない対策）。
-function ensureRecog() {
-  if (recog) return recog;
-  recog = new SR();
-  recog.lang = "ja-JP";
-  recog.continuous = true;
-  recog.interimResults = true;
-  recog.onresult = (e) => {
+// SpeechRecognition は iOS 安定重視で **毎回つくり直し**、continuous=false（1発話ごと）。
+// 認識の状況・エラーを画面にそのまま出して、端末ごとの不調を見えるようにする。
+function makeRecog() {
+  const r = new SR();
+  r.lang = "ja-JP";
+  r.continuous = false;        // iOS 対策：1発話ごと（話し終わると自動で止まる）
+  r.interimResults = true;
+  r.onstart = () => { voiceErrored = false; vStatus("🎤 聞き取り中…話してください（話し終わると自動で止まります）"); };
+  r.onresult = (e) => {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) voiceFinal += r[0].transcript;
-      else interim += r[0].transcript;
+      const res = e.results[i];
+      if (res.isFinal) voiceFinal += res[0].transcript;
+      else interim += res[0].transcript;
     }
     applyTranscript(interim);
-    vStatus("聞いています…");
+    const t = (voiceFinal + interim).trim();
+    vStatus(t ? `聞き取り：${t}` : "聞いています…");
   };
-  recog.onerror = (e) => {
-    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      voiceActive = false; voiceStopping = true;   // 再開しない
-      vStatus("マイクが使えません（手入力は続けられます）", true);
-    } else if (e.error === "no-speech") {
-      vStatus("音声が聞き取れませんでした");
-    } else {
-      vStatus("認識でエラー（手入力は続けられます）", true);
-    }
+  r.onerror = (e) => {
+    voiceActive = false; voiceErrored = true; vBtn(false);
+    const m = {
+      "service-not-allowed": "音声入力がオフのようです。iPhone の『設定＞一般＞キーボード＞音声入力』をオンにしてください（手入力は使えます）",
+      "not-allowed": "マイクが許可されていません。アドレスバーの「ぁA」→Webサイトの設定でマイクを許可してください（手入力は使えます）",
+      "no-speech": "音声が聞き取れませんでした。もう一度どうぞ",
+      "audio-capture": "マイクが見つかりません（手入力は使えます）",
+      "network": "音声認識サーバーに接続できませんでした（通信を確認。手入力は使えます）",
+      "aborted": "",
+    };
+    const msg = e.error in m ? m[e.error] : `認識エラー：${e.error}（手入力は使えます）`;
+    if (msg) vStatus(msg, true);
   };
-  recog.onend = () => {
-    if (voiceActive && !voiceStopping) {
-      try { recog.start(); return; } catch {}   // iOS 対策：止めるまで自動再開
-    }
-    finishVoice();
-  };
-  return recog;
+  r.onend = () => { finishVoice(); };   // continuous=false：再開せず確定へ
+  return r;
 }
 
 function startVoice() {
   if (!voiceSupported || voiceActive) return;
   // 確認待ちのまま話し直したら、その未反映ぶんは取り消してメモを戻す
   if (vProposal) { document.getElementById("f-note").value = vProposal.base; vProposal = null; hideProposal(); }
-  const r = ensureRecog();
+  // 前のインスタンスはハンドラを外してから abort（古い onend で finishVoice が走らないように）
+  if (recog) { try { recog.onstart = recog.onresult = recog.onerror = recog.onend = null; recog.abort(); } catch {} }
+  recog = makeRecog();
   voiceBase = document.getElementById("f-note").value.trim();
   voiceFinal = "";
   voiceStopping = false;
   voiceSilent = false;
+  voiceErrored = false;
   try {
-    r.start();
+    recog.start();
     voiceActive = true;
     vBtn(true);
-    vStatus("聞いています…（話し終わったら「停止」）");
-  } catch {
-    // 直前のセッションが残っていれば一度 abort して気づける形にする
-    try { r.abort(); } catch {}
+    vStatus("🎤 起動中…");
+  } catch (err) {
     voiceActive = false;
-    vStatus("もう一度「音声で入力」を押してください", true);
+    vStatus(`音声を開始できませんでした：${(err && err.name) || err}`, true);
   }
 }
 
@@ -1093,11 +1094,12 @@ function redoProposal() {
 async function finishVoice() {
   voiceActive = false;
   vBtn(false);
+  if (voiceErrored) { voiceErrored = false; return; }  // エラー文言を消さない
   if (voiceSilent) { voiceSilent = false; return; }  // 棟移動：メモ・振り分けに触れない
   applyTranscript("");     // 暫定分を確定表示に
   saveDraft();             // ここまでの文字は必ず端末に残す
   const text = voiceFinal.trim();
-  if (!text) { vStatus(""); return; }
+  if (!text) { vStatus("聞き取れませんでした。もう一度『音声で入力』を押して話してください", true); return; }
 
   vStatus("内容を振り分け中…");
   const askedPending = vPending;   // この発話が答えている質問の項目
