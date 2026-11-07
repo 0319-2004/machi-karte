@@ -689,8 +689,11 @@ function buildPlan() {
     ? { lon: userPos.lon, lat: userPos.lat }
     : { lon: targetsById[byPriority[0]].lon, lat: targetsById[byPriority[0]].lat };
 
-  // 200m グループを作り、グループ順を最適化（重心で NN+2-opt、起点から）
-  const groups = groupMembership(byPriority);
+  // 少数（Google に一度で渡せる上限＝NAV_MAX_STOPS 以下）は距離で分けず1グループに
+  // まとめ、1本のルートで全棟を回れるようにする。多いときだけ 200m でグループ化する。
+  const groups = byPriority.length <= NAV_MAX_STOPS
+    ? [byPriority.slice()]
+    : groupMembership(byPriority);
   const gpts = groups.map((g) => ({ members: g, ...centroid(g) }));
   const gorder = optimizePath(start, gpts);
 
