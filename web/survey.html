@@ -273,6 +273,7 @@
   <div id="view-pick" class="view">
     <div class="bar">
       <h1>現地調査｜地図で選ぶ</h1>
+      <a href="/attribution" class="ghost" title="データの出典・帰属表示">出典</a>
       <button id="dl-open" class="ghost" title="確定済みから更新候補を出力">⬇ 出力</button>
       <button id="toggle-list" class="ghost" title="リスト⇄地図を切り替える">リスト</button>
     </div>
@@ -320,9 +321,11 @@
     <div id="plan-summary" class="plan-summary"></div>
     <div id="plan-route" class="plan-route hidden"></div>
     <div id="plan-groups"></div>
-    <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
-      target="_blank" rel="noopener">国土地理院（地理院タイル）</a>／徒歩経路：<a
-      href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a>（© OpenStreetMap contributors, ODbL）</div>
+    <div class="attrib">建物：<a href="https://www.mlit.go.jp/plateau/" target="_blank"
+      rel="noopener">PLATEAU</a>／背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
+      target="_blank" rel="noopener">国土地理院</a>／徒歩経路：<a href="https://project-osrm.org/"
+      target="_blank" rel="noopener">OSRM</a>（© OpenStreetMap contributors, ODbL）／<a
+      href="/attribution">出典一覧 ↗</a></div>
   </div>
 
   <!-- 3. 入力（既存流用＋グループ・距離） -->
@@ -336,6 +339,11 @@
       <div id="mini-map"></div>
       <button type="button" id="go-here" class="go-here">🧭 ここへ行く</button>
     </div>
+    <div class="attrib">建物：<a href="https://www.mlit.go.jp/plateau/" target="_blank"
+      rel="noopener">PLATEAU</a>／背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
+      target="_blank" rel="noopener">国土地理院</a>／徒歩経路：<a href="https://project-osrm.org/"
+      target="_blank" rel="noopener">OSRM</a>（© OpenStreetMap contributors, ODbL）／<a
+      href="/attribution">出典一覧 ↗</a></div>
     <div class="survey-body">
       <div class="input-group" id="input-group"></div>
       <div class="route-info hidden" id="route-info"></div>
