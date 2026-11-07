@@ -404,12 +404,12 @@ class Image:
     """Claude に渡す1枚の画像。data は base64 文字列。"""
     media_type: str
     data: str
-    source: str = ""     # Mapillary / ortho / lod2texture など
+    source: str = ""     # ortho / lod2texture など
     url: str = ""
 
 
 def no_images(building_id: str) -> list[Image]:
-    """既定の画像プロバイダ：画像なし（Mapillary等は後回し）。"""
+    """既定の画像プロバイダ：画像なし（画像判定は後回し）。"""
     return []
 
 

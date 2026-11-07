@@ -61,9 +61,9 @@ ATTRIBUTION_TABLE = [
     ("PLATEAU", "出典明示（国土交通省 Project PLATEAU）"),
     ("OpenStreetMap", "© OpenStreetMap contributors（ODbL）"),
     ("Overture Maps", "CDLA Permissive 2.0。Foursquare 由来の項目は NOTICE を添える"),
-    ("Mapillary", "ロゴとリンクを表示。画像ごとに「by *username*, CC BY-SA」"),
     ("東京都デジタルツイン", "CC BY 4.0"),
     ("国土地理院", "出典明示（地理院タイル）"),
+    ("OSRM", "BSD-2-Clause。現地調査の徒歩経路の取得に使用。経路データは OpenStreetMap（ODbL）由来"),
 ]
 
 GUIDANCE_SYSTEM = (

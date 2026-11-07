@@ -42,7 +42,7 @@ CSV_COLUMNS = [
 
 ATTRIBUTION = "出典：国土交通省 Project PLATEAU（新宿区）。近傍推定は PLATEAU 既知棟由来。"
 LICENSE_NOTE = ("source が poi / osm_building の行は OpenStreetMap 由来を含み ODbL の対象に"
-                "なり得る。Mapillary の画像は含めない（参照名のみ）。公式データへの書き込みではない。")
+                "なり得る。公式データへの書き込みではない。")
 
 _USAGE_LABELS = usage_label_map()
 

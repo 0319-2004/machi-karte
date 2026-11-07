@@ -35,7 +35,7 @@ cp .env.example .env     # APIキー等を記入
 - **このリポジトリのコードは [MIT ライセンス](LICENSE)**（Copyright (c) 2026 YNRTR）。
 - **`data/` はリポジトリに含めない。** 生データ・派生データ・キャッシュは各データ源のライセンスにそれぞれ従う。
 - **出力ファイル（更新候補リスト）には、使ったデータ源のライセンスが及ぶ。** `source` が `poi` / `osm_building` の行は OpenStreetMap 由来を含むため ODbL の対象になり得る。
-- **Mapillary の画像はリポジトリにも出力にも含めない**（参照 URL のみ。画面表示には帰属表示を付ける）。
+- **現地調査の徒歩経路は OSRM（BSD-2-Clause）で取得する。** デモは公開サーバー `router.project-osrm.org` を使うが、**本番は自前の OSRM サーバーを立てる前提**（公開サーバーは SLA が無く、負荷・可用性の保証が無いため）。現在地は経路取得のためだけに使い、保存しない。OSRM に送るのは座標のみ。経路データは OpenStreetMap（ODbL）由来。
 
 詳細は [`docs/attribution.md`](docs/attribution.md) の「ライセンス方針」を参照。
 

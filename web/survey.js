@@ -49,6 +49,121 @@ function goTo(id) {
   window.open(navDirectionsUrl(t.lat, t.lon), "_blank", "noopener");
 }
 
+// --- アプリ内の徒歩経路（OSRM。線はこちらで描く。ターンバイターンの案内はしない） ----
+// 現在地→目的の建物の徒歩経路を、入力画面のミニ地図と俯瞰地図に描く。
+// 距離と線形は OSRM の経路、所要時間は「徒歩＝80m/分」で算出する
+//（公開デモサーバーは profile を無視して車速の duration を返すため、時間は距離から出す）。
+// 取得に失敗したら直線距離＋方向だけ出す（止まらない）。
+// 位置情報は経路取得のためだけに使い、保存しない。OSRM に送るのは座標のみ。
+const OSRM = "https://router.project-osrm.org";   // 本番は自前サーバーに差し替える（README 参照）
+let miniMeMarker = null, planMeMarker = null;
+
+function getCurrentPos() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(userPos);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { userPos = { lon: p.coords.longitude, lat: p.coords.latitude }; resolve(userPos); },
+      () => resolve(userPos),             // 取れなければ既知の userPos（無ければ null）。保存はしない
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+  });
+}
+async function fetchFootRoute(from, to) {
+  const u = `${OSRM}/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(u);
+  if (!res.ok) throw new Error("osrm " + res.status);
+  const j = await res.json();
+  const r = j.routes && j.routes[0];
+  if (!r || !r.geometry) throw new Error("no route");
+  return r;                              // {geometry(LineString), distance(m), duration(s)}
+}
+// 徒歩の所要時間は距離から（80m/分＝不動産表示の慣行）。OSRM の duration は使わない。
+function walkMinutes(m) { return Math.max(1, Math.round(m / 80)); }
+function fmtWalk(m) { return `徒歩約${walkMinutes(m)}分・${fmtDist(m)}`; }
+function bearingDeg(a, b) {
+  const rad = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * rad) * Math.cos(b.lat * rad);
+  const x = Math.cos(a.lat * rad) * Math.sin(b.lat * rad)
+          - Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lon - a.lon) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+function compass(deg) {
+  return ["北", "北東", "東", "南東", "南", "南西", "西", "北西"][Math.round(deg / 45) % 8] + "の方向";
+}
+function routeFC(coords) {
+  return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } };
+}
+function drawRouteLine(map, feature, approx) {
+  const ID = "walk-route";
+  const run = () => {
+    const data = feature || routeFC([]);
+    if (map.getSource(ID)) map.getSource(ID).setData(data);
+    else {
+      map.addSource(ID, { type: "geojson", data });
+      map.addLayer({ id: ID, type: "line", source: ID,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-width": 5, "line-opacity": 0.9, "line-color": "#2ad4e8" } });
+    }
+    // 実経路＝シアン、直線フォールバック＝橙で区別する
+    map.setPaintProperty(ID, "line-color", approx ? COLOR_TGT : "#2ad4e8");
+  };
+  // スタイルが読めていれば即描く。map.loaded() はタイル保留中に false を返し、
+  // そのとき once("load") が再発火せずレイヤが付かないため isStyleLoaded() で判定する。
+  if (map.isStyleLoaded()) run(); else map.once("load", run);
+}
+function setRouteInfo(el, text, approx) {
+  if (!el) return;
+  el.textContent = "🚶 " + text;
+  el.classList.remove("hidden");
+  el.classList.toggle("approx", !!approx);
+}
+function fitRoute(map, coords) {
+  if (!coords || !coords.length) return;
+  const b = new maplibregl.LngLatBounds();
+  coords.forEach((c) => b.extend(c));
+  if (!b.isEmpty()) map.fitBounds(b, { padding: 50, maxZoom: 17, duration: 500 });
+}
+function meEl() { const e = document.createElement("div"); e.className = "me-dot"; return e; }
+
+// 現在地→目的地の経路を map に描く。fit=true なら経路全体に合わせてズーム（ミニ地図用）。
+// 俯瞰地図は全ピン表示を保つため fit=false（線とピンだけ重ねる）。
+async function renderWalkRoute(map, meMarker, targetId, infoEl, fit) {
+  const t = targetsById[targetId];
+  if (!map || !t || t.lon == null) return;
+  const pos = await getCurrentPos();
+  if (!pos) {                             // 現在地が取れない：経路も直線も描けない
+    drawRouteLine(map, routeFC([]));
+    if (meMarker) meMarker.remove();
+    setRouteInfo(infoEl, "現在地が取れません（「ここへ行く」で地図アプリを使えます）", true);
+    return;
+  }
+  if (meMarker) meMarker.setLngLat([pos.lon, pos.lat]).addTo(map);
+  try {
+    const r = await fetchFootRoute(pos, t);
+    drawRouteLine(map, routeFC(r.geometry.coordinates), false);
+    setRouteInfo(infoEl, fmtWalk(r.distance), false);
+    if (fit) fitRoute(map, r.geometry.coordinates);
+  } catch {
+    // フォールバック：直線距離＋方向（止まらない）
+    const d = distM(pos, t);
+    drawRouteLine(map, routeFC([[pos.lon, pos.lat], [t.lon, t.lat]]), true);
+    setRouteInfo(infoEl, `直線 ${fmtDist(d)}・${compass(bearingDeg(pos, t))}（経路を取得できませんでした）`, true);
+    if (fit) fitRoute(map, [[pos.lon, pos.lat], [t.lon, t.lat]]);
+  }
+}
+// 入力画面：いま開いている棟への経路（棟を移動すると自動で更新＝次の棟に切り替わる）
+async function updateMiniRoute() {
+  const id = planOrder[idx]; if (!id || !miniMap) return;
+  if (!miniMeMarker) miniMeMarker = new maplibregl.Marker({ element: meEl() });
+  await renderWalkRoute(miniMap, miniMeMarker, id, document.getElementById("route-info"), true);
+}
+// 俯瞰地図：訪問順の「次に行く棟」（未調査の先頭）への経路
+async function updatePlanRoute() {
+  if (!planMap || !planOrder.length) return;
+  const id = planOrder.find((x) => !lsGet(LS.draft(x), {}).done) || planOrder[0];
+  if (!planMeMarker) planMeMarker = new maplibregl.Marker({ element: meEl() });
+  await renderWalkRoute(planMap, planMeMarker, id, document.getElementById("plan-route"), false);
+}
+
 let usageCodes = [];
 let targets = [];                 // 全調査対象（優先度順、coords つき）
 let targetsById = {};
@@ -481,6 +596,7 @@ function buildPlan() {
   let total = 0; for (let i = 0; i < seq.length - 1; i++) total += distM(seq[i], seq[i + 1]);
 
   renderPlanMap(); renderPlanGroups(); updatePlanSummary(total);
+  updatePlanRoute();                    // 「次に行く棟」への徒歩経路を俯瞰地図に描く
 }
 
 function updatePlanSummary(total) {
@@ -534,12 +650,8 @@ function renderPlanMap() {
         bounds.extend([t.lon, t.lat]);
       });
     });
-    if (userPos) {
-      const me = document.createElement("div"); me.className = "me-dot";
-      planMarkers.push(new maplibregl.Marker({ element: me })
-        .setLngLat([userPos.lon, userPos.lat]).addTo(planMap));
-      bounds.extend([userPos.lon, userPos.lat]);
-    }
+    // 現在地の点は updatePlanRoute 側の planMeMarker が担当（経路取得で得た位置を使う）
+    if (userPos) bounds.extend([userPos.lon, userPos.lat]);
     if (!bounds.isEmpty()) planMap.fitBounds(bounds, { padding: 46, maxZoom: 16, duration: 600 });
   };
   if (planMap.loaded()) run(); else planMap.once("load", run);
@@ -630,6 +742,7 @@ document.getElementById("input-back").addEventListener("click", () => {
   document.getElementById("view-input").classList.add("hidden");
   document.getElementById("view-plan").classList.remove("hidden");
   renderPlanGroups();                       // 調査済マークを反映
+  updatePlanRoute();                        // 次に行く棟が変わっていれば経路も更新
   setTimeout(() => planMap && planMap.resize(), 50);
 });
 // 入力画面の「ここへ行く」：いま開いている棟へ徒歩ルートを出す
@@ -662,6 +775,7 @@ async function loadBuilding(i) {
 
   const t = targetsById[id] || {};
   placeMini(t.lon, t.lat);
+  updateMiniRoute();                 // この棟への徒歩経路（棟を移動すると自動で更新）
 
   // グループ・距離の表示（入力画面にも足す）
   const g = groupOf(id);

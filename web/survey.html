@@ -258,6 +258,14 @@
     .nav-pop .np-id { font-family:var(--mono); font-size:13px; font-weight:700; margin:0 14px 8px 0; }
     .nav-pop .np-go { width:100%; border:1px solid var(--cyan); background:transparent;
       color:var(--cyan); border-radius:8px; padding:9px 12px; font-size:14px; font-weight:700; }
+    /* --- アプリ内の徒歩経路（OSRM。線はこちらで描く、ターンバイターンはしない） --- */
+    .route-info { margin:6px 2px 0; font-size:13px; color:var(--cyan); font-weight:700;
+      display:flex; align-items:center; gap:6px; }
+    .route-info.approx { color:var(--sub); }      /* 直線距離＋方向のフォールバック時 */
+    .route-info .ri-sub { color:var(--sub); font-weight:400; font-size:12px; }
+    .plan-route { margin:0 12px 8px; font-size:13px; color:var(--cyan); font-weight:700; }
+    .plan-route.approx { color:var(--sub); }
+    .plan-route .pr-sub { color:var(--sub); font-weight:400; font-size:12px; }
   </style>
 </head>
 <body>
@@ -310,9 +318,11 @@
     </div>
     <div class="plan-mapwrap"><div id="plan-map"></div></div>
     <div id="plan-summary" class="plan-summary"></div>
+    <div id="plan-route" class="plan-route hidden"></div>
     <div id="plan-groups"></div>
     <div class="attrib">背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
-      target="_blank" rel="noopener">国土地理院（地理院タイル）</a>／経路は表示しません</div>
+      target="_blank" rel="noopener">国土地理院（地理院タイル）</a>／徒歩経路：<a
+      href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a>（© OpenStreetMap contributors, ODbL）</div>
   </div>
 
   <!-- 3. 入力（既存流用＋グループ・距離） -->
@@ -328,6 +338,7 @@
     </div>
     <div class="survey-body">
       <div class="input-group" id="input-group"></div>
+      <div class="route-info hidden" id="route-info"></div>
       <div class="est" id="survey-est">推定を読み込み中…</div>
       <div class="guide hidden" id="survey-guide"></div>
       <div class="field">

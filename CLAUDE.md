@@ -15,10 +15,7 @@ PLATEAU 新宿区（13104）の建物属性のうち、調査が及んでいな�
 - すべてのコードはこのリポジトリで新規に書く。既存のスクリプトや他プロジェクトからコピーしない
 - 権利を確認できないコード・データ・素材を使わない
   - 使わない：Google Street View / Google Places / Google Maps、ゼンリン住宅地図、不動産ポータル
-- Mapillary
-  - 公開API（Graph API v4）以外の手段で取得しない（スクレイピング禁止）
-  - 顔やナンバープレートのぼかし解除・再識別をしない
-  - ナビゲーション、経路案内、車両の自動・自律制御の機能を作らない
+- 徒歩経路は OSRM（BSD-2-Clause、OpenStreetMap 由来）で取得する。デモは公開サーバー、本番は自前運用。現在地は経路取得にだけ使い保存しない（OSRM に送るのは座標のみ）
 - APIキーは環境変数で渡す。`.env` はコミットしない。`.env.example` のみコミットする
 - 公式データは上書きしない。元の属性は `buildings` に残し、推定は `candidates`、人の確定は `confirmations` に入れる
 - UI、出力ファイル、README、コミットメッセージは日本語
@@ -84,6 +81,6 @@ UIを前に、推定を後ろに。どの時点で止まっても「抽出 → �
 | PLATEAU | 出典明示（国土交通省 Project PLATEAU） |
 | OpenStreetMap | © OpenStreetMap contributors（ODbL） |
 | Overture Maps | CDLA Permissive 2.0。Foursquare 由来の項目は NOTICE を添える |
-| Mapillary | ロゴとリンクを表示。画像ごとに「by 'username', CC BY-SA」 |
 | 東京都デジタルツイン | CC BY 4.0 |
 | 国土地理院 | 出典明示（地理院タイル） |
+| OSRM | BSD-2-Clause。徒歩経路の取得に使用。経路データは OpenStreetMap（ODbL）由来 |
