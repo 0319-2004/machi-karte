@@ -694,6 +694,23 @@ function addManyToPlan(ids) {
   tray.classList.add("flash");
   setTimeout(() => tray.classList.remove("flash"), 600);
 }
+// 範囲選択の確定：スマホと同じく「2回囲むと解除」。囲んだ中の半数以上が既に
+// 選択済みなら、まとめて解除（少しズレて囲んでも確実に外せるよう半数基準）。
+// それ以外は未選択を追加する。{action, n} を返す。
+function toggleRegionPlan(ids) {
+  if (!ids.length) return { action: "none", n: 0 };
+  const already = ids.filter((id) => planSel.includes(id)).length;
+  if (already * 2 >= ids.length) {
+    const before = planSel.length;
+    planSel = planSel.filter((id) => !ids.includes(id));
+    savePlanSel(); renderPlanTray();
+    return { action: "removed", n: before - planSel.length };
+  }
+  let n = 0;
+  for (const id of ids) if (!planSel.includes(id)) { planSel.push(id); n++; }
+  savePlanSel(); renderPlanTray();
+  return { action: "added", n };
+}
 
 // 計画の紫ハイライトを地図に反映（b-tgt / b-non の色式を現在の選択に合わせて塗り替える）。
 // デモの抽出前（targetsRevealed=false）は灰色演出を壊さないよう触らない。
@@ -898,8 +915,11 @@ async function loadPlans() {
     const feats = map.queryRenderedFeatures([[x0, y0], [x1, y1]], { layers: ["b-tgt"] });
     const ids = [...new Set(feats.map((f) => f.properties.id))];
     if (!ids.length) { hint.textContent = "囲んだ範囲に調査対象はありませんでした"; return; }
-    addManyToPlan(ids);
-    hint.textContent = `${ids.length} 棟を追加しました（合計は左下トレイ →「QRで渡す」）`;
+    // スマホと同じ：2回囲むと解除（半数以上が選択済みなら、まとめて外す）
+    const r = toggleRegionPlan(ids);
+    hint.textContent = r.action === "removed"
+      ? `${r.n} 棟の選択を解除しました（もう一度囲むと選択）`
+      : `${r.n} 棟を追加しました（合計は左下トレイ →「QRで渡す」）`;
   });
   mapEl.addEventListener("pointercancel", () => { start = null; box.style.display = "none"; });
 })();
