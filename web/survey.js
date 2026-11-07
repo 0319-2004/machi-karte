@@ -17,15 +17,37 @@ const GSI = {
   sources: { gsi: { type: "raster",
     tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
     tileSize: 256, attribution: "国土地理院（地理院タイル）" } },
-  layers: [{ id: "gsi", type: "raster", source: "gsi" }],
+  // kepler.gl 調：地理院タイル（淡色）を暗く沈める（出典表示は維持）
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#0e1116" } },
+    { id: "gsi", type: "raster", source: "gsi",
+      paint: { "raster-opacity": 0.8, "raster-brightness-max": 0.45,
+               "raster-saturation": -0.3, "raster-contrast": 0.1 } },
+  ],
 };
-const COLOR_TGT = "#e64a19", COLOR_SEL = "#2e7d32";
-const GROUP_COLORS = ["#1565c0", "#6a1b9a", "#ef6c00", "#00838f", "#c2185b",
-                      "#558b0f", "#4527a0", "#00695c"];
+const COLOR_TGT = "#ff6a2b", COLOR_SEL = "#43d19e";
+const GROUP_COLORS = ["#2ad4e8", "#ff6a2b", "#b06bff", "#43d19e", "#ffca3a",
+                      "#5ea0ff", "#ff6b9d", "#7ee787"];
 const GROUP_RADIUS_M = 200;
 
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+// --- 「ここへ行く」：外部の地図アプリで徒歩ルートを開く -----------------------
+// アプリ内に経路は描かない。渡すのは目的地（建物の重心）だけ。出発地は渡さず、
+// 現在地は外部アプリ側（Apple/Google マップ）が扱う。こちらでは位置情報を保存しない。
+function navDirectionsUrl(lat, lon) {
+  // iOS は Apple マップ、それ以外は Google マップ。どちらも徒歩（walking）指定。
+  // 端末判定は既存の isIOS（iPhone/iPad/iPod・iPadOS 対応）を使う。
+  if (isIOS) return `https://maps.apple.com/?daddr=${lat},${lon}&dirflg=w`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
+}
+function goTo(id) {
+  const t = targetsById[id];
+  if (!t || t.lon == null || t.lat == null) return;
+  // 新しいタブ/外部アプリで開く（この画面の入力は消えない）
+  window.open(navDirectionsUrl(t.lat, t.lon), "_blank", "noopener");
+}
 
 let usageCodes = [];
 let targets = [];                 // 全調査対象（優先度順、coords つき）
@@ -478,7 +500,19 @@ function initPlanMap() {
   });
 }
 let planMarkers = [];
+let planPopup = null;
 function clearPlanMarkers() { planMarkers.forEach((m) => m.remove()); planMarkers = []; }
+
+// 俯瞰地図のピンをタップ → 「ここへ行く」ボタン付きの小ポップアップ
+function openPlanPopup(id, lon, lat) {
+  if (planPopup) planPopup.remove();
+  const html = `<div class="nav-pop"><div class="np-id">${id}</div>` +
+    `<button type="button" class="np-go">🧭 ここへ行く</button></div>`;
+  planPopup = new maplibregl.Popup({ offset: 26, closeButton: true, closeOnClick: true })
+    .setLngLat([lon, lat]).setHTML(html).addTo(planMap);
+  planPopup.getElement().querySelector(".np-go")
+    .addEventListener("click", () => goTo(id));
+}
 
 function renderPlanMap() {
   if (!planMap) return;
@@ -492,8 +526,9 @@ function renderPlanMap() {
         const t = targetsById[id]; if (!t) return;
         n++;
         const el = document.createElement("div");
-        el.className = "pin"; el.style.background = color;
+        el.className = "pin"; el.style.background = color; el.style.cursor = "pointer";
         el.innerHTML = `<span>${n}</span>`;
+        el.addEventListener("click", (e) => { e.stopPropagation(); openPlanPopup(id, t.lon, t.lat); });
         planMarkers.push(new maplibregl.Marker({ element: el, anchor: "bottom" })
           .setLngLat([t.lon, t.lat]).addTo(planMap));
         bounds.extend([t.lon, t.lat]);
@@ -519,7 +554,12 @@ function renderPlanGroups() {
     const wrap = document.createElement("div"); wrap.className = "group";
     const head = document.createElement("div"); head.className = "group-head";
     head.innerHTML = `<span class="gdot" style="background:${color}"></span>` +
-      `グループ${gi + 1}（${grp.length}棟）`;
+      `グループ${gi + 1}（${grp.length}棟）` +
+      `<button type="button" class="grp-go">🧭 このグループへ行く</button>`;
+    // グループの先頭（訪問順の最初）の棟へ徒歩ルートを出す
+    head.querySelector(".grp-go").addEventListener("click", (e) => {
+      e.stopPropagation(); goTo(grp[0]);
+    });
     wrap.appendChild(head);
     grp.forEach((id) => {
       n++;
@@ -591,6 +631,10 @@ document.getElementById("input-back").addEventListener("click", () => {
   document.getElementById("view-plan").classList.remove("hidden");
   renderPlanGroups();                       // 調査済マークを反映
   setTimeout(() => planMap && planMap.resize(), 50);
+});
+// 入力画面の「ここへ行く」：いま開いている棟へ徒歩ルートを出す
+document.getElementById("go-here").addEventListener("click", () => {
+  const id = planOrder[idx]; if (id) goTo(id);
 });
 
 function groupOf(id) {
