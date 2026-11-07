@@ -105,7 +105,9 @@
   <!-- 調査計画トレイ（PC で選んだ棟をまとめ、QR で現地スマホへ渡す） -->
   <div id="plan-tray" class="empty">
     <div class="pt-head" id="pt-head" role="button" title="計画に入れた棟の一覧">
-      📋 調査計画 <b id="pt-count">0</b> 棟 <span id="pt-caret">▸</span>
+      <span class="pt-label">📋 調査計画 <b id="pt-count">0</b> 棟</span>
+      <button type="button" id="pt-clear" class="hidden" title="計画の棟をすべて解除">クリア</button>
+      <span id="pt-caret">▸</span>
     </div>
     <ul id="pt-list" class="hidden"></ul>
     <div class="pt-actions">

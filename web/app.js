@@ -702,6 +702,7 @@ function renderPlanTray() {
   document.getElementById("pt-count").textContent = planSel.length;
   planTray.classList.toggle("empty", planSel.length === 0);
   document.getElementById("pt-save").disabled = planSel.length === 0;
+  document.getElementById("pt-clear").classList.toggle("hidden", planSel.length === 0);
   updatePlanLayer();   // 紫ハイライトを地図に反映
   const ul = document.getElementById("pt-list");
   ul.innerHTML = "";
@@ -720,6 +721,19 @@ function renderPlanTray() {
 document.getElementById("pt-head").addEventListener("click", () => {
   const hidden = document.getElementById("pt-list").classList.toggle("hidden");
   document.getElementById("pt-caret").textContent = hidden ? "▸" : "▾";
+});
+// 「クリア」：計画の棟をすべて解除（一覧の開閉とは別操作なので伝播を止める）
+function clearPlan() {
+  if (!planSel.length) return;
+  planSel.length = 0;          // 同じ配列参照のまま空に（localStorage も []）
+  savePlanSel();
+  renderPlanTray();            // 件数・紫ハイライト（b-plan）もここで消える
+  const b = document.getElementById("btn-plan");   // 確認カードを開いていれば表示を戻す
+  if (b) { b.classList.remove("on"); b.textContent = "＋ 調査計画に追加（現地で確認）"; }
+}
+document.getElementById("pt-clear").addEventListener("click", (e) => {
+  e.stopPropagation();
+  clearPlan();
 });
 
 // 「QRで渡す」：選んだ棟をサーバーに保存 → 計画ID を受け取り、受け渡しURL と QR を出す
