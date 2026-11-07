@@ -16,6 +16,18 @@
 
 ---
 
+## 2026-11-07 QR を明日ノー設定で開けるように：make tunnel が公開URLでPC画面を自動起動＋現在オリジン優先
+
+- 背景 / きっかけ：前項で「公開URLを手で貼る」運用にしたが、本番当日に手間なく開けるようにしたい。Quick Tunnel のURLは毎回変わるので、保存URLは翌日には陳腐化する。
+- 判断：
+  1. **`scripts/field_demo.sh`（make tunnel）が、取得した公開URLで PC の操作画面 `<tunnel>/map.html` を `open` で自動起動**。これで `location.origin` が公開URLになり、QRは設定なしで正しくなる。バナーにも「PC操作画面は必ず公開URLで開く／localhost だと QR が localhost になる」と明記。
+  2. **`planBase()` を『現在のオリジンがスマホから到達可能ならそれを最優先』に変更**。トンネルで開いていれば、localStorage に前日の（死んだ）公開URLが残っていても**無視して現在のトンネルURL**で QR を作る。localhost / LAN で開いたときだけ手動設定の公開URLを使う（従来のフォールバック）。
+- 動作確認（実ブラウザ/CDP＝トンネルURLで map.html を開く）：origin＝トンネル。**古い保存URLを仕込んでも** QR は現在のトンネルURLになり、警告なし・設定不要。QR の `survey.html?plan=<id>` はトンネル経由で 200。`bash -n` OK。テスト計画は `make reset-plans` で一掃（確定41件は保持）。
+- 当日の手順：`make tunnel` → PC操作画面が公開URLで自動で開く → 囲んで計画 →「QRで渡す」→ スマホでQR読取 → 開く（手入力ゼロ）。
+- 影響範囲：`scripts/field_demo.sh`（map.html 自動 open・バナー）、`web/app.js`（`planBase` の優先順位）、`web/README.md`。API・DB は不変。
+
+---
+
 ## 2026-11-07 QRが localhost になりスマホで開けない問題：公開URL（ベース）を設定可能に
 
 - 背景 / きっかけ：QR を読み込んでもスマホでページが開けない。原因は、PC の地図画面を `http://localhost:8000` で開いていたため、受け渡し URL が `location.origin`＝`localhost` になり、QR に localhost が載っていた（localhost はスマホ自身を指すので到達不可）。サーバーも cloudflared が割り当てる公開URLを知らないため自動解決できない。

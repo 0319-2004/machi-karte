@@ -71,19 +71,34 @@ if [ -z "$URL" ]; then
 fi
 
 SURVEY_URL="$URL/survey.html"
+MAP_URL="$URL/map.html"
 echo
 echo "════════════════════════════════════════════════════════"
-echo "  スマホでこれを開く（現地調査・「ここへ行く」）："
+echo "  PC（このMac）の操作画面（絞り込み・QR発行）："
+echo
+echo "    $MAP_URL"
+echo
+echo "  スマホで直接開くなら（現地調査・「ここへ行く」）："
 echo
 echo "    $SURVEY_URL"
 echo
 echo "  トップ（デモ）：   $URL/"
 echo "════════════════════════════════════════════════════════"
+echo
+echo "  ※ PC操作画面は必ず上の公開URL（$URL）で開くこと。"
+echo "    localhost で開くと QR が localhost になりスマホで開けません。"
 if command -v qrencode >/dev/null 2>&1; then
   echo
   qrencode -t ANSIUTF8 "$SURVEY_URL"
 else
   echo "  （QRを出すなら: brew install qrencode ）"
+fi
+
+# PC（このMac）のブラウザを公開URLで自動で開く＝QRが自動で正しくなる（localhostで開かない）。
+if command -v open >/dev/null 2>&1; then
+  open "$MAP_URL" >/dev/null 2>&1 || true
+  echo
+  echo "▶ PCの操作画面を公開URLで開きました（$MAP_URL）"
 fi
 echo
 echo "起動中。Ctrl-C で全部停止します。本番が終わるまで止めないこと。"

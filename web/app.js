@@ -812,6 +812,10 @@ document.getElementById("pt-save").addEventListener("click", async () => {
 const PLAN_BASE_LS = "mk.desk.planBase";
 let lastPlanId = null;
 function planBase() {
+  // トンネル等、スマホから到達できるアドレスでこの画面を開いていれば、それを最優先。
+  // （PCをトンネルURLで開けば設定不要。前日の古い保存URLにも引きずられない。）
+  if (!isUnreachableOrigin(location.origin)) return location.origin;
+  // localhost / LAN で開いているときだけ、手動設定の公開URLを使う。
   const saved = (localStorage.getItem(PLAN_BASE_LS) || "").trim().replace(/\/+$/, "");
   return saved || location.origin;
 }
