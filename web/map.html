@@ -14,10 +14,12 @@
   <!-- エレクトリックな抽出演出のキャンバス（最前面・既定は非表示） -->
   <canvas id="demo-bolt"></canvas>
 
-  <!-- 地図を囲んで調査計画にまとめて追加（3Dの建物をドラッグで囲む） -->
+  <!-- 地図ツール：視点（真上/3D）と範囲選択（囲んで計画に追加）。タブレット対応でボタン操作 -->
   <div id="map-tools">
+    <button id="view-toggle" type="button"
+      title="真上からの俯瞰と3D表示を切り替える（選択とは別）">⬆ 真上から見る</button>
     <button id="region-toggle" type="button"
-      title="地図をドラッグで囲み、中の調査対象を調査計画にまとめて追加">⬚ 囲んで計画に追加</button>
+      title="ONの間だけドラッグ（指でも）で囲み、中の調査対象を計画に追加">⬚ 範囲選択</button>
     <span id="region-hint" class="hidden">ドラッグで囲んだ調査対象を計画に追加します</span>
   </div>
   <div id="map-box"></div>

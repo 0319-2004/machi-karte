@@ -226,18 +226,22 @@ html, body { margin: 0; height: 100%; background: var(--k-bg);
 #lowconf-modal #lc-cancel { background: var(--k-panel-2); color: var(--k-mut); border-color: var(--k-line-2); }
 #lowconf-modal #lc-cancel:hover { color: var(--k-fg); }
 
-/* 地図を囲んで計画に追加（左上のツール＋矩形オーバーレイ） */
+/* 地図ツール（左上）：視点切り替え＋範囲選択＋矩形オーバーレイ */
 #map-tools { position: absolute; top: 16px; left: 16px; z-index: 4; display: flex; align-items: center; gap: 10px; }
-#region-toggle { padding: 9px 14px; border: 1px solid var(--k-purple); border-radius: 8px; cursor: pointer;
-  background: var(--k-panel); color: #c79bff; font-size: 13px; font-weight: 700;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+#map-tools button { padding: 9px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700;
+  background: var(--k-panel); box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+#view-toggle { border: 1px solid var(--k-cyan); color: var(--k-cyan); }
+#view-toggle:hover { background: rgba(42,212,232,0.12); }
+#view-toggle.on { background: var(--k-cyan); color: #04212a; }
+#region-toggle { border: 1px solid var(--k-purple); color: #c79bff; }
 #region-toggle:hover { background: rgba(176,107,255,0.14); }
 #region-toggle.on { background: var(--k-purple); color: #140a24; }
 #region-hint { font-size: 12px; color: #d9c8ff; background: rgba(176,107,255,0.14);
   border: 1px solid var(--k-line); padding: 5px 10px; border-radius: 6px; }
 #region-hint.hidden { display: none; }
-/* 囲みモードでも通常ドラッグで移動できる（範囲選択は Shift＋ドラッグ）。
-   パンを妨げないよう cursor/touch-action は強制しない。 */
+/* 範囲選択モード（region-on）の間だけ、ドラッグ（指でも）を矩形選択に使う＝地図は固定 */
+#map.region-on { cursor: crosshair; }
+#map.region-on .maplibregl-canvas { touch-action: none; }
 #map-box { position: absolute; z-index: 4; display: none; pointer-events: none;
   border: 2px solid var(--k-purple); background: rgba(176,107,255,0.18); border-radius: 2px; }
 

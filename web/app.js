@@ -817,51 +817,58 @@ async function loadPlans() {
   } catch (e) { box.innerHTML = "<p class='pl-empty'>進捗を取得できませんでした。</p>"; }
 }
 
-// --- 地図を囲んで調査計画にまとめて追加（3Dの建物をドラッグで囲む） --------
-// queryRenderedFeatures で矩形内に描画されている調査対象（b-tgt）を拾い、計画に入れる。
-// 3D（pitch あり）でも「見た目で囲んだ範囲」をそのまま拾えるのでピッチ補正は不要。
-(function setupMapRegionSelect() {
+// --- 地図ツール：視点（真上/3D）と範囲選択（囲んで計画に追加） --------------
+// タブレットでも使えるよう Shift を使わず、2つのボタンで切り替える。
+//  ・視点ボタン：真上（ピッチ0・北上）⇄ 3D。選択とは独立（移動はいつでも可）。
+//  ・範囲選択ボタン：ON の間だけドラッグ（指でも）で矩形選択。OFF なら地図は通常どおり移動。
+// queryRenderedFeatures で矩形内の調査対象（b-tgt）を拾う（3D/真上どちらでも見た目どおり）。
+(function setupMapTools() {
   const mapEl = document.getElementById("map");
   const box = document.getElementById("map-box");
-  const btn = document.getElementById("region-toggle");
+  const viewBtn = document.getElementById("view-toggle");
+  const regionBtn = document.getElementById("region-toggle");
   const hint = document.getElementById("region-hint");
-  let on = false, start = null, savedCam = null;
+  const HINT = "ドラッグ（指でも）で囲んで選択。移動したいときは「範囲選択」を切ってください。";
+  let topDown = false, selOn = false, start = null, savedCam = null;
   const pt = (ev) => {
     const r = mapEl.getBoundingClientRect();
     return { x: ev.clientX - r.left, y: ev.clientY - r.top };
   };
-  const HINT_DEFAULT = "通常ドラッグで移動／Shift＋ドラッグで囲んで選択（真上から）";
-  function setMode(v) {
-    on = v;
-    btn.classList.toggle("on", on);
-    btn.textContent = on ? "✓ 囲みモード中（解除）" : "⬚ 囲んで計画に追加";
-    hint.classList.toggle("hidden", !on);
-    hint.textContent = HINT_DEFAULT;
-    mapEl.classList.toggle("region-on", on);
-    if (on) {
-      // 移動はできるようにパンは残し、Shift＋ドラッグの範囲選択と衝突する boxZoom だけ止める
-      map.boxZoom.disable();
-      // 囲みやすいよう、真上からの俯瞰（ピッチ0・北上）へギュインと切り替える
+
+  // 視点の切り替え（選択とは独立）。真上＝ピッチ0・北上、戻すと元の3D視点。
+  function setTopDown(v) {
+    topDown = v;
+    viewBtn.classList.toggle("on", topDown);
+    viewBtn.textContent = topDown ? "⟲ 3D表示に戻す" : "⬆ 真上から見る";
+    if (topDown) {
       savedCam = { pitch: map.getPitch(), bearing: map.getBearing() };
       map.easeTo({ pitch: 0, bearing: 0, duration: 650, easing: (t) => t * (2 - t) });
-    } else {
-      map.boxZoom.enable(); map.dragPan.enable();
-      // 解除したら元の3D視点に戻す
-      if (savedCam) {
-        map.easeTo({ pitch: savedCam.pitch, bearing: savedCam.bearing,
-                     duration: 650, easing: (t) => t * (2 - t) });
-        savedCam = null;
-      }
+    } else if (savedCam) {
+      map.easeTo({ pitch: savedCam.pitch, bearing: savedCam.bearing,
+                   duration: 650, easing: (t) => t * (2 - t) });
+      savedCam = null;
     }
+  }
+  viewBtn.addEventListener("click", () => setTopDown(!topDown));
+
+  // 範囲選択モード。ON の間は地図のジェスチャ（パン/ズーム/回転）を止め、ドラッグを矩形に使う。
+  const gestures = () => [map.dragPan, map.boxZoom, map.doubleClickZoom,
+                          map.touchZoomRotate, map.touchPitch];
+  function setSelect(v) {
+    selOn = v;
+    regionBtn.classList.toggle("on", selOn);
+    regionBtn.textContent = selOn ? "✓ 範囲選択中（解除）" : "⬚ 範囲選択";
+    hint.classList.toggle("hidden", !selOn);
+    hint.textContent = HINT;
+    mapEl.classList.toggle("region-on", selOn);
+    gestures().forEach((g) => g && (selOn ? g.disable() : g.enable()));
     start = null; box.style.display = "none";
   }
-  btn.addEventListener("click", () => setMode(!on));
+  regionBtn.addEventListener("click", () => setSelect(!selOn));
 
   mapEl.addEventListener("pointerdown", (ev) => {
-    // Shift＋ドラッグのときだけ範囲選択。通常ドラッグはパン（別の地点を見られる）。
-    if (!on || !ev.shiftKey) return;
+    if (!selOn) return;
     ev.preventDefault();
-    map.dragPan.disable();            // この選択ドラッグの間だけパンを止める
     try { mapEl.setPointerCapture(ev.pointerId); } catch {}
     start = pt(ev);
     box.style.display = "block";
@@ -869,7 +876,7 @@ async function loadPlans() {
     box.style.width = "0px"; box.style.height = "0px";
   });
   mapEl.addEventListener("pointermove", (ev) => {
-    if (!on || !start) return;
+    if (!selOn || !start) return;
     const p = pt(ev);
     box.style.left = Math.min(start.x, p.x) + "px";
     box.style.top = Math.min(start.y, p.y) + "px";
@@ -877,9 +884,8 @@ async function loadPlans() {
     box.style.height = Math.abs(p.y - start.y) + "px";
   });
   mapEl.addEventListener("pointerup", (ev) => {
-    if (!on || !start) return;
+    if (!selOn || !start) return;
     const p = pt(ev), s = start; start = null; box.style.display = "none";
-    map.dragPan.enable();             // 選択が終わったらパンを戻す
     const x0 = Math.min(s.x, p.x), y0 = Math.min(s.y, p.y);
     const x1 = Math.max(s.x, p.x), y1 = Math.max(s.y, p.y);
     if (x1 - x0 < 5 && y1 - y0 < 5) return;   // クリック扱い（誤爆回避）
@@ -889,9 +895,7 @@ async function loadPlans() {
     addManyToPlan(ids);
     hint.textContent = `${ids.length} 棟を追加しました（合計は左下トレイ →「QRで渡す」）`;
   });
-  mapEl.addEventListener("pointercancel", () => {
-    start = null; box.style.display = "none"; map.dragPan.enable();
-  });
+  mapEl.addEventListener("pointercancel", () => { start = null; box.style.display = "none"; });
 })();
 
 // --- 共有（更新候補 CSV/GeoJSON を Web Share API でファイル共有） -----------
