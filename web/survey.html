@@ -119,6 +119,9 @@
     .plan-mapwrap { position:relative; flex:0 0 32vh; min-height:150px; }
     .plan-summary { padding:7px var(--pad); font-size:12.5px; color:var(--ink);
       background:rgba(255,202,58,.08); border-bottom:1px solid var(--line); line-height:1.4; }
+    /* 外部地図（Googleマップ）へは番号順で渡す、という注記（ピンに名前は出ないため） */
+    .plan-navnote { margin:6px var(--pad) 0; font-size:11.5px; color:var(--sub); line-height:1.5; }
+    .plan-navnote b { color:var(--ink); }
     #plan-groups { flex:1; overflow-y:auto; padding:6px var(--pad) 14px; }
     .group { margin-top:10px; }
     .group-head { font-size:13px; font-weight:700; color:var(--ink); padding:4px 0;
@@ -326,6 +329,8 @@
     <div class="plan-mapwrap"><div id="plan-map"></div></div>
     <div id="plan-summary" class="plan-summary"></div>
     <div id="plan-route" class="plan-route hidden"></div>
+    <div class="plan-navnote">🧭「このグループへ行く」は Google マップに<b>この一覧の番号順</b>で渡します。
+      地図のピンには番号・建物IDは出ないので、<b>番号を照らし合わせて</b>回ってください。</div>
     <div id="plan-groups"></div>
     <div class="attrib">建物：<a href="https://www.mlit.go.jp/plateau/" target="_blank"
       rel="noopener">PLATEAU</a>／背景：<a href="https://maps.gsi.go.jp/development/ichiran.html"
