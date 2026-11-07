@@ -48,9 +48,17 @@ const HEIGHT_EXPR = ["coalesce", ["get", "h"], 3];
 // デモ演出モード（map.html は body.demo で開始）。demo.js が段階を進める。
 // このモードでは件数と建物の色を即時に出さず、「新宿」入力→抽出の流れで公開する。
 const DEMO = document.body.classList.contains("demo");
-// デモで抽出まで隠すハイライト系レイヤ（計画=紫・確定=緑・現地確認=濃い紫・選択=黄・写真=シアン）
-const DEMO_OVERLAY_LAYERS = ["b-plan", "b-onsite", "b-done-onsite", "b-sel", "b-photo"];
+// デモで抽出まで隠すハイライト系レイヤ（確定=緑・現地確認=濃い紫・選択=黄・写真=シアン）
+// 計画の紫は b-tgt 自体の色切替で表すのでここには含めない。
+const DEMO_OVERLAY_LAYERS = ["b-onsite", "b-done-onsite", "b-sel", "b-photo"];
+let targetsRevealed = !DEMO;   // デモは抽出後に true。以後は選択で b-tgt を紫に塗り替える
 window.MK = {};   // demo.js へ渡すフック（map / 色の切り替え / カウント）
+
+// 建物色の式：計画に入っている棟は紫、それ以外は base 色（橙 or 灰）。
+// 別レイヤを重ねず 1 レイヤの色を切り替える＝3D でも Z ファイティングが起きない。
+function planColorExpr(base) {
+  return ["case", ["in", ["get", "id"], ["literal", planSel]], COLOR_PLAN, base];
+}
 
 let stats = null;
 let targetsOnly = false;
@@ -228,7 +236,8 @@ function addBuildingLayers() {
     filter: ["==", ["get", "t"], 0],
     paint: {
       "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
-      "fill-extrusion-color": COLOR_NON,
+      "fill-extrusion-color": DEMO ? COLOR_NON : planColorExpr(COLOR_NON),
+      "fill-extrusion-color-transition": { duration: 900 },
       "fill-extrusion-opacity": DEMO ? 0 : 0.85,
       "fill-extrusion-opacity-transition": { duration: 1500 },
     },
@@ -239,21 +248,11 @@ function addBuildingLayers() {
     paint: {
       "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
       // デモでは最初は全棟と同じ灰色・非表示。抽出の瞬間に橙へ変える。
-      "fill-extrusion-color": DEMO ? COLOR_NON : COLOR_TGT,
+      // 選択中は紫（b-tgt 自体の色を切り替える＝別レイヤを重ねず Z ファイティングを避ける）。
+      "fill-extrusion-color": DEMO ? COLOR_NON : planColorExpr(COLOR_TGT),
       "fill-extrusion-color-transition": { duration: 900 },
       "fill-extrusion-opacity": DEMO ? 0 : 0.9,
       "fill-extrusion-opacity-transition": { duration: 900 },
-    },
-  });
-  // 調査計画に入れた棟を紫でハイライト（選択中だと一目でわかるように）。
-  // b-tgt と同じ外形・同じ高さだと真上（ピッチ0）で Z ファイティングして橙に負け、
-  // 色が変わって見えない。少し高く・不透明にして確実に上へ出す。
-  map.addLayer({
-    id: "b-plan", type: "fill-extrusion", source: "buildings",
-    filter: ["in", ["get", "id"], ["literal", planSel]],
-    paint: {
-      "fill-extrusion-height": ["+", HEIGHT_EXPR, 4], "fill-extrusion-base": 0,
-      "fill-extrusion-color": COLOR_PLAN, "fill-extrusion-opacity": 1,
     },
   });
   // 現地確認が必要な棟（判断不能の区分）のハイライト。既定は非表示（空フィルタ）。
@@ -282,7 +281,7 @@ function addBuildingLayers() {
       "fill-extrusion-color": COLOR_SEL, "fill-extrusion-opacity": 1,
     },
   });
-  for (const id of ["b-non", "b-tgt", "b-plan", "b-onsite", "b-done-onsite", "b-sel"]) {
+  for (const id of ["b-non", "b-tgt", "b-onsite", "b-done-onsite", "b-sel"]) {
     map.on("click", id, (e) => selectBuilding(e.features[0].properties.id));
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
@@ -329,9 +328,12 @@ function addBuildingLayers() {
     map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0.85);
   };
   window.MK.revealTargets = () => {
-    map.setPaintProperty("b-tgt", "fill-extrusion-color", COLOR_TGT);
+    targetsRevealed = true;
+    // 橙で出す（選択中の棟は紫）。b-non も選択で紫になるよう色式に戻す。
+    map.setPaintProperty("b-tgt", "fill-extrusion-color", planColorExpr(COLOR_TGT));
     map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0.9);
-    // 抽出まで隠していたハイライト（計画=紫・確定=緑・写真=シアン等）をここで出す
+    map.setPaintProperty("b-non", "fill-extrusion-color", planColorExpr(COLOR_NON));
+    // 抽出まで隠していたハイライト（確定=緑・現地確認=濃い紫・写真=シアン等）をここで出す
     for (const id of DEMO_OVERLAY_LAYERS) map.setLayoutProperty(id, "visibility", "visible");
   };
 
@@ -693,10 +695,14 @@ function addManyToPlan(ids) {
   setTimeout(() => tray.classList.remove("flash"), 600);
 }
 
-// 地図の b-plan レイヤ（紫ハイライト）を現在の計画選択に合わせる
+// 計画の紫ハイライトを地図に反映（b-tgt / b-non の色式を現在の選択に合わせて塗り替える）。
+// デモの抽出前（targetsRevealed=false）は灰色演出を壊さないよう触らない。
 function updatePlanLayer() {
-  if (!map.getLayer || !map.getLayer("b-plan")) return;   // 地図読み込み前はスキップ
-  map.setFilter("b-plan", ["in", ["get", "id"], ["literal", planSel]]);
+  if (!targetsRevealed || !map.getLayer || !map.getLayer("b-tgt")) return;
+  map.setPaintProperty("b-tgt", "fill-extrusion-color", planColorExpr(COLOR_TGT));
+  if (map.getLayer("b-non")) {
+    map.setPaintProperty("b-non", "fill-extrusion-color", planColorExpr(COLOR_NON));
+  }
 }
 
 const planTray = document.getElementById("plan-tray");
@@ -729,7 +735,7 @@ function clearPlan() {
   if (!planSel.length) return;
   planSel.length = 0;          // 同じ配列参照のまま空に（localStorage も []）
   savePlanSel();
-  renderPlanTray();            // 件数・紫ハイライト（b-plan）もここで消える
+  renderPlanTray();            // 件数・紫ハイライト（b-tgt の色）もここで戻る
   const b = document.getElementById("btn-plan");   // 確認カードを開いていれば表示を戻す
   if (b) { b.classList.remove("on"); b.textContent = "＋ 調査計画に追加（現地で確認）"; }
 }
