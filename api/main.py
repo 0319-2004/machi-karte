@@ -12,6 +12,7 @@ import html
 import json
 import os
 import re
+import secrets
 import statistics
 from contextlib import asynccontextmanager
 
@@ -515,6 +516,115 @@ def photos() -> list[dict]:
         ).fetchall()
     return [{"building_id": bid, "count": n, "latest": str(latest)[:10],
              "lon": lon, "lat": lat} for (bid, n, latest, lon, lat) in rows]
+
+
+# --- 調査計画（PC で選んだ棟を QR で現地スマホへ渡す） ----------------------
+
+class PlanBody(BaseModel):
+    building_ids: list[str] = []   # PC の地図で選んだ建物ID
+    created_by: str | None = None  # 作成者（任意）
+    title: str | None = None       # 計画名（任意。未指定なら「調査計画（N棟）」）
+
+
+def _new_plan_id(con) -> str:
+    """短いURL安全な計画IDを採番（衝突したら引き直す）。"""
+    for _ in range(8):
+        pid = secrets.token_hex(4)   # 8桁の16進（URL・QR に載せやすい）
+        if not con.execute(
+            "SELECT 1 FROM survey_plans WHERE plan_id=?", [pid]
+        ).fetchone():
+            return pid
+    return secrets.token_hex(8)
+
+
+def _plan_done_ids(con, building_ids: list[str]) -> list[str]:
+    """計画の棟のうち、確定（confirmations に行がある）済みの建物IDを返す。
+
+    進捗は survey_plans に状態を持たず、confirmations との突き合わせで都度数える
+    （現地・机上どちらの確定でも「調査済み」とみなす）。
+    """
+    if not building_ids:
+        return []
+    ph = ",".join(["?"] * len(building_ids))
+    rows = con.execute(
+        f"SELECT DISTINCT building_id FROM confirmations "
+        f"WHERE version=? AND building_id IN ({ph})",
+        [VERSION, *building_ids],
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+@app.post("/api/plans")
+def create_plan(body: PlanBody) -> dict:
+    """PC で選んだ棟を調査計画として保存し、計画IDを返す（受け渡しURL/QRはフロントで作る）。
+
+    実在する建物IDだけに絞り、重複は入力順を保って除く。1件も残らなければ 400。
+    """
+    seen: set[str] = set()
+    ids = [str(b) for b in (body.building_ids or [])
+           if b and not (str(b) in seen or seen.add(str(b)))]
+    if not ids:
+        raise HTTPException(status_code=400, detail="建物が選ばれていません")
+    with db_lock:
+        con = get_con()
+        ph = ",".join(["?"] * len(ids))
+        valid = {r[0] for r in con.execute(
+            f"SELECT building_id FROM buildings WHERE version=? AND building_id IN ({ph})",
+            [VERSION, *ids],
+        ).fetchall()}
+        ids = [x for x in ids if x in valid]   # 入力順は保つ
+        if not ids:
+            raise HTTPException(status_code=400, detail="有効な建物IDがありません")
+        title = (body.title or "").strip() or f"調査計画（{len(ids)}棟）"
+        plan_id = _new_plan_id(con)
+        con.execute(
+            "INSERT INTO survey_plans (plan_id, version, title, building_ids, created_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [plan_id, VERSION, title, ids, (body.created_by or "").strip() or None],
+        )
+    return {"plan_id": plan_id, "title": title, "count": len(ids),
+            "building_ids": ids}
+
+
+@app.get("/api/plans")
+def list_plans() -> list[dict]:
+    """調査計画の一覧（新しい順）。各計画の進捗（done / total）を添える（PC の進捗表示用）。"""
+    with db_lock:
+        con = get_con()
+        rows = con.execute(
+            "SELECT plan_id, title, building_ids, created_at, created_by "
+            "FROM survey_plans WHERE version=? ORDER BY created_at DESC",
+            [VERSION],
+        ).fetchall()
+        out = []
+        for (pid, title, ids, created, by) in rows:
+            ids = list(ids or [])
+            out.append({
+                "plan_id": pid, "title": title,
+                "total": len(ids), "done": len(_plan_done_ids(con, ids)),
+                "created_at": str(created)[:19], "created_by": by,
+            })
+    return out
+
+
+@app.get("/api/plans/{plan_id}")
+def get_plan(plan_id: str) -> dict:
+    """1つの調査計画。building_ids と進捗（done_ids）を返す（現地スマホが読み込む）。"""
+    with db_lock:
+        con = get_con()
+        row = con.execute(
+            "SELECT plan_id, title, building_ids, created_at, created_by "
+            "FROM survey_plans WHERE version=? AND plan_id=?",
+            [VERSION, plan_id],
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="調査計画が見つかりません")
+        (pid, title, ids, created, by) = row
+        ids = list(ids or [])
+        done_ids = _plan_done_ids(con, ids)
+    return {"plan_id": pid, "title": title, "building_ids": ids,
+            "total": len(ids), "done": len(done_ids), "done_ids": done_ids,
+            "created_at": str(created)[:19], "created_by": by}
 
 
 # --- 計測の集計（処理済みN棟 / 合計M分 / 中央値S秒） ------------------------

@@ -173,8 +173,13 @@ function renderOnsiteGroups() {
       `<div class="og-top"><span class="og-title">${ATTR_LABEL[g.attribute] || g.attribute}</span>` +
       `<span class="og-count">${g.count.toLocaleString()}棟</span></div>` +
       `<div class="og-reason">理由：${g.reason}</div>` +
-      `<div class="og-chips">${chips(g.bands)}${chips(g.areas)}</div>` + guide;
+      `<div class="og-chips">${chips(g.bands)}${chips(g.areas)}</div>` + guide +
+      `<button type="button" class="og-plan">＋ この区分を調査計画に追加</button>`;
     el.addEventListener("click", () => focusGroup(g));
+    el.querySelector(".og-plan").addEventListener("click", (e) => {
+      e.stopPropagation();   // グループの絞り込み（focusGroup）は走らせない
+      addManyToPlan(g.building_ids || []);
+    });
     box.appendChild(el);
   }
 }
@@ -524,9 +529,12 @@ function renderConfirm(d) {
     `<div class="c-attrs">${rows}</div>` +
     `<div class="c-usage"><label>用途コード（修正する場合に選ぶ）</label>` +
     `<select id="usage-select">${opts}</select></div>`;
+  const inPlan = planSel.includes(a.id);
   confirmFoot.innerHTML =
     `<div class="c-operator"><label for="operator-input">確定者</label>` +
     `<input id="operator-input" type="text" placeholder="調査担当者" /></div>` +
+    `<button id="btn-plan" class="c-plan${inPlan ? " on" : ""}">` +
+    `${inPlan ? "✓ 調査計画に追加済み（外す）" : "＋ 調査計画に追加（現地で確認）"}</button>` +
     `<div class="c-actions">` +
     `<button id="btn-keep">そのまま確定</button>` +
     `<button id="btn-edit">修正して確定</button></div>` +
@@ -539,6 +547,13 @@ function renderConfirm(d) {
 
   document.getElementById("btn-keep").addEventListener("click", attemptKeep);
   document.getElementById("btn-edit").addEventListener("click", () => doConfirm(false));
+  document.getElementById("btn-plan").addEventListener("click", () => {
+    togglePlan(a.id);
+    const on = planSel.includes(a.id);
+    const b = document.getElementById("btn-plan");
+    b.classList.toggle("on", on);
+    b.textContent = on ? "✓ 調査計画に追加済み（外す）" : "＋ 調査計画に追加（現地で確認）";
+  });
   wirePhotoNav(d.photos);
   confirmScroll.scrollTop = 0;
   confirmPanel.classList.remove("hidden");
@@ -573,13 +588,10 @@ function openLowConfModal(lowNames) {
 }
 function closeLowConfModal() { lowModal.classList.add("hidden"); }
 
-// 確定せず、現地調査モードの選択リストに追加する（現地確認に回す）
+// 確定せず、調査計画（現地調査モードの選択リスト）に追加する（現地確認に回す）
 function queueForSurvey(id) {
   if (!id) return;
-  let sel = [];
-  try { sel = JSON.parse(localStorage.getItem(SURVEY_SELECTED_LS)) || []; } catch {}
-  if (!sel.includes(id)) sel.push(id);
-  localStorage.setItem(SURVEY_SELECTED_LS, JSON.stringify(sel));
+  if (!planSel.includes(id)) { planSel.push(id); savePlanSel(); renderPlanTray(); }
   surveyQueued.add(id);
   renderList();
   openNext(id);   // 確定はせず、次の優先棟へ送る
@@ -637,10 +649,172 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Escape") closeConfirm();
 });
 
+// --- 調査計画（PC で選び、QR で現地スマホへ渡す） --------------------------
+// 選択は現地調査モードと同じ localStorage（mk.survey.selected）に持つので、
+// 低確度ダイアログの「現地確認リストに追加」ともそのまま合流する。
+let planSel = [];
+try { planSel = JSON.parse(localStorage.getItem(SURVEY_SELECTED_LS)) || []; } catch {}
+
+function savePlanSel() { localStorage.setItem(SURVEY_SELECTED_LS, JSON.stringify(planSel)); }
+function togglePlan(id) {
+  const i = planSel.indexOf(id);
+  if (i >= 0) planSel.splice(i, 1); else planSel.push(id);
+  savePlanSel(); renderPlanTray();
+}
+function addManyToPlan(ids) {
+  let added = 0;
+  for (const id of ids) if (!planSel.includes(id)) { planSel.push(id); added++; }
+  savePlanSel(); renderPlanTray();
+  const tray = document.getElementById("plan-tray");
+  tray.classList.add("flash");
+  setTimeout(() => tray.classList.remove("flash"), 600);
+}
+
+const planTray = document.getElementById("plan-tray");
+function renderPlanTray() {
+  document.getElementById("pt-count").textContent = planSel.length;
+  planTray.classList.toggle("empty", planSel.length === 0);
+  document.getElementById("pt-save").disabled = planSel.length === 0;
+  const ul = document.getElementById("pt-list");
+  ul.innerHTML = "";
+  for (const id of planSel) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${id}</span><button class="pt-rm" title="計画から外す">外す</button>`;
+    li.querySelector(".pt-rm").addEventListener("click", () => {
+      togglePlan(id);
+      // いま開いている確認カードのボタン表示も合わせる
+      if (current === id) { const b = document.getElementById("btn-plan");
+        if (b) { b.classList.remove("on"); b.textContent = "＋ 調査計画に追加（現地で確認）"; } }
+    });
+    ul.appendChild(li);
+  }
+}
+document.getElementById("pt-head").addEventListener("click", () => {
+  const hidden = document.getElementById("pt-list").classList.toggle("hidden");
+  document.getElementById("pt-caret").textContent = hidden ? "▸" : "▾";
+});
+
+// 「QRで渡す」：選んだ棟をサーバーに保存 → 計画ID を受け取り、受け渡しURL と QR を出す
+const planModal = document.getElementById("plan-modal");
+document.getElementById("pt-save").addEventListener("click", async () => {
+  if (!planSel.length) return;
+  const btn = document.getElementById("pt-save");
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = "保存中…";
+  try {
+    const res = await fetch("/api/plans", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ building_ids: planSel, created_by: getDeskOperator() }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+    // 受け渡しURL は PC のいまのオリジンで作る（LAN/トンネル越しでもスマホが辿れる）
+    const url = location.origin + "/survey.html?plan=" + encodeURIComponent(d.plan_id);
+    showPlanModal(d, url);
+  } catch (e) {
+    alert("調査計画の保存に失敗しました：" + e.message);
+  } finally {
+    btn.disabled = planSel.length === 0; btn.textContent = orig;
+  }
+});
+
+function showPlanModal(plan, url) {
+  // 既定タイトルは「調査計画（N棟）」で棟数を含む。カスタム名のときだけ棟数を添える。
+  document.getElementById("pm-title").textContent =
+    /（\d+棟）\s*$/.test(plan.title) ? plan.title : `${plan.title}（${plan.count}棟）`;
+  document.getElementById("pm-url").value = url;
+  const box = document.getElementById("pm-qr");
+  box.innerHTML = "";
+  try {
+    const qr = qrcode(0, "M");   // 0=型番自動、M=誤り訂正中
+    qr.addData(url);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+  } catch {
+    box.textContent = "QR を生成できませんでした（URL をコピーして渡してください）";
+  }
+  planModal.classList.remove("hidden");
+}
+document.getElementById("pm-close").addEventListener("click", () =>
+  planModal.classList.add("hidden"));
+document.getElementById("pm-copy").addEventListener("click", async () => {
+  const input = document.getElementById("pm-url");
+  try { await navigator.clipboard.writeText(input.value); }
+  catch { input.select(); document.execCommand && document.execCommand("copy"); }
+  const b = document.getElementById("pm-copy"); const o = b.textContent;
+  b.textContent = "コピーしました"; setTimeout(() => (b.textContent = o), 1500);
+});
+
+// 「進捗」：保存済みの計画を一覧し、何棟中何棟終わったかを出す
+const plansModal = document.getElementById("plans-modal");
+document.getElementById("pt-plans").addEventListener("click", loadPlans);
+document.getElementById("pl-close").addEventListener("click", () =>
+  plansModal.classList.add("hidden"));
+async function loadPlans() {
+  const box = document.getElementById("pl-list");
+  box.innerHTML = "<p class='pl-empty'>読み込み中…</p>";
+  plansModal.classList.remove("hidden");
+  try {
+    const list = await (await fetch("/api/plans")).json();
+    if (!list.length) { box.innerHTML = "<p class='pl-empty'>保存済みの調査計画はありません。</p>"; return; }
+    box.innerHTML = "";
+    for (const p of list) {
+      const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+      const by = p.created_by ? `・${p.created_by}` : "";
+      const row = document.createElement("div");
+      row.className = "pl-row";
+      row.innerHTML =
+        `<div class="pl-top"><span class="pl-title">${p.title}</span>` +
+        `<span class="pl-frac">${p.done} / ${p.total} 棟</span></div>` +
+        `<div class="pl-bar"><span style="width:${pct}%"></span></div>` +
+        `<div class="pl-meta">${p.created_at}${by}　<a href="/survey.html?plan=${p.plan_id}" ` +
+        `target="_blank" rel="noopener">現地調査で開く ↗</a></div>`;
+      box.appendChild(row);
+    }
+  } catch (e) { box.innerHTML = "<p class='pl-empty'>進捗を取得できませんでした。</p>"; }
+}
+
+// --- 共有（更新候補 CSV/GeoJSON を Web Share API でファイル共有） -----------
+// 対応端末（navigator.canShare でファイル共有が可能）でだけボタンを出す。
+function canShareFiles() {
+  try {
+    return !!(navigator.canShare && navigator.canShare(
+      { files: [new File(["x"], "t.txt", { type: "text/plain" })] }));
+  } catch { return false; }
+}
+async function shareUpdateCandidates(btn) {
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = "準備中…";
+  try {
+    const [csv, geo] = await Promise.all([
+      fetch("/api/export.csv").then((r) => r.blob()),
+      fetch("/api/export.geojson").then((r) => r.blob()),
+    ]);
+    const files = [
+      new File([csv], "update_candidates_13104.csv", { type: "text/csv" }),
+      new File([geo], "update_candidates_13104.geojson", { type: "application/geo+json" }),
+    ];
+    const payload = { title: "まちカルテ 更新候補",
+      text: "まちカルテで確定した更新候補（CSV / GeoJSON）です。" };
+    if (navigator.canShare && navigator.canShare({ ...payload, files })) {
+      await navigator.share({ ...payload, files });
+    } else {
+      await navigator.share({ ...payload, files: [files[0]] });  // 複数不可なら CSV のみ
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") { /* ユーザーが共有を閉じた：何もしない */ }
+    else alert("共有できませんでした：" + (e && e.message || e));
+  } finally { btn.disabled = false; btn.textContent = orig; }
+}
+const dlShare = document.getElementById("dl-share");
+if (canShareFiles()) {
+  dlShare.classList.remove("hidden");
+  dlShare.addEventListener("click", () => shareUpdateCandidates(dlShare));
+}
+
 // --- 起動 -------------------------------------------------------------------
 // デモ演出（demo.js）へ map と数字アニメーションを渡す
 window.MK.map = map;
 window.MK.animateCount = animateCount;
+renderPlanTray();
 
 loadStats();
 loadUsageCodes();

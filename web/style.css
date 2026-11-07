@@ -249,6 +249,95 @@ html, body { margin: 0; height: 100%; background: var(--k-bg);
   border: none; font-weight: 700; font-size: 13px; cursor: pointer; }
 #download #dl-report:hover { filter: brightness(1.08); }
 #download #dl-report:disabled { background: var(--k-panel-2); color: var(--k-dim); cursor: default; }
+#download #dl-share { padding: 5px 12px; border-radius: 6px; background: var(--k-purple); color: #140a24;
+  border: none; font-weight: 700; font-size: 13px; cursor: pointer; }
+#download #dl-share:hover { filter: brightness(1.08); }
+#download #dl-share.hidden { display: none; }
+#download.empty #dl-report, #download.empty #dl-share {
+  background: var(--k-panel-2); color: var(--k-dim); pointer-events: none; }
+
+/* 確認カード：調査計画に追加（現地確認に回す） */
+.c-plan { width: 100%; margin: 4px 0 0; padding: 10px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 700; background: var(--k-panel-2); color: #c79bff;
+  border: 1px solid var(--k-purple); }
+.c-plan:hover { background: rgba(176,107,255,0.12); }
+.c-plan.on { background: var(--k-purple); color: #140a24; }
+
+/* 現地確認グループの「調査計画に追加」 */
+.og .og-plan { margin-top: 8px; width: 100%; padding: 7px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 700; background: var(--k-panel-2); color: #c79bff;
+  border: 1px solid var(--k-line-2); }
+.og .og-plan:hover { border-color: var(--k-purple); background: rgba(176,107,255,0.12); }
+
+/* 調査計画トレイ（左下・現地調査リンクの上） */
+#plan-tray {
+  position: fixed; left: 10px; bottom: 56px; z-index: 5; width: 230px;
+  background: var(--k-panel); border: 1px solid var(--k-purple); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5); font-size: 13px; overflow: hidden;
+}
+#plan-tray.empty { border-color: var(--k-line); }
+#plan-tray.flash { animation: ptFlash 0.6s ease; }
+@keyframes ptFlash { 0%, 100% { box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+  40% { box-shadow: 0 0 0 3px rgba(176,107,255,0.5), 0 8px 28px rgba(0,0,0,0.5); } }
+.pt-head { padding: 9px 12px; cursor: pointer; font-weight: 700; color: var(--k-fg);
+  display: flex; align-items: center; gap: 4px; }
+.pt-head b { font-family: var(--k-mono); color: var(--k-purple); font-size: 16px;
+  font-variant-numeric: tabular-nums; }
+.pt-head #pt-caret { margin-left: auto; color: var(--k-dim); font-size: 12px; }
+#pt-list { margin: 0; padding: 0; list-style: none; max-height: 34vh; overflow-y: auto;
+  border-top: 1px solid var(--k-line); }
+#pt-list.hidden { display: none; }
+#pt-list li { display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+  border-bottom: 1px solid var(--k-line); }
+#pt-list li span { font-family: var(--k-mono); font-size: 12px; color: var(--k-mut); }
+#pt-list .pt-rm { margin-left: auto; border: none; background: var(--k-panel-2); color: var(--k-red);
+  border-radius: 5px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+.pt-actions { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--k-line); }
+.pt-actions button { flex: 1; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  font-weight: 700; border: 1px solid transparent; }
+#pt-save { background: var(--k-purple); color: #140a24; }
+#pt-save:hover { filter: brightness(1.08); }
+#pt-save:disabled { background: var(--k-panel-2); color: var(--k-dim); cursor: default; }
+#pt-plans { background: var(--k-panel-2); color: var(--k-fg); border-color: var(--k-line-2); }
+#pt-plans:hover { border-color: var(--k-cyan); color: var(--k-cyan); }
+
+/* 調査計画の受け渡し（QR）モーダル */
+#plan-modal, #plans-modal { position: fixed; inset: 0; z-index: 25; display: flex;
+  align-items: center; justify-content: center; background: rgba(0,0,0,0.6); }
+#plan-modal.hidden, #plans-modal.hidden { display: none; }
+.pm-box, .pl-box { position: relative; background: var(--k-panel); border: 1px solid var(--k-line);
+  border-radius: 12px; padding: 22px 24px; max-width: 380px; width: 90%;
+  box-shadow: 0 14px 44px rgba(0,0,0,0.6); text-align: center; }
+#pm-close, #pl-close { position: absolute; top: 8px; right: 12px; border: 0; background: none;
+  font-size: 22px; cursor: pointer; color: var(--k-dim); }
+#pm-close:hover, #pl-close:hover { color: var(--k-fg); }
+.pm-box h3, .pl-box h3 { margin: 0 0 10px; font-size: 17px; color: var(--k-fg); }
+.pm-title { margin: 0 0 4px; font-weight: 700; color: var(--k-purple); font-size: 14px; }
+.pm-lead { margin: 0 0 14px; font-size: 13px; color: var(--k-mut); line-height: 1.6; }
+.pm-qr { background: #fff; border-radius: 8px; padding: 10px; display: inline-block; line-height: 0; }
+.pm-qr svg { width: 220px; height: 220px; display: block; }
+.pm-url { display: flex; gap: 6px; margin: 14px 0 6px; }
+.pm-url input { flex: 1; min-width: 0; padding: 8px; border: 1px solid var(--k-line-2); border-radius: 6px;
+  font-size: 12px; background: var(--k-elev); color: var(--k-mut); font-family: var(--k-mono); }
+#pm-copy { flex: 0 0 auto; padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer;
+  background: var(--k-cyan); color: #04212a; font-weight: 700; font-size: 12px; }
+.pm-note { margin: 6px 0 0; font-size: 11.5px; color: var(--k-dim); line-height: 1.5; }
+
+/* 調査計画の進捗一覧 */
+.pl-box { text-align: left; max-width: 420px; }
+#pl-list { max-height: 60vh; overflow-y: auto; }
+.pl-empty { font-size: 13px; color: var(--k-mut); text-align: center; padding: 16px 0; }
+.pl-row { border: 1px solid var(--k-line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+  background: var(--k-elev); }
+.pl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pl-title { font-weight: 700; color: var(--k-fg); font-size: 13px; }
+.pl-frac { font-family: var(--k-mono); font-size: 13px; color: var(--k-green); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.pl-bar { height: 6px; border-radius: 4px; background: var(--k-panel-2); margin: 7px 0 5px; overflow: hidden; }
+.pl-bar span { display: block; height: 100%; background: var(--k-green); border-radius: 4px; }
+.pl-meta { font-size: 11px; color: var(--k-dim); }
+.pl-meta a { color: var(--k-cyan); text-decoration: none; }
+.pl-meta a:hover { text-decoration: underline; }
 
 /* =========================================================================
    配布デモの段階表示（body.demo + stage-0 / stage-1 / stage-2）
@@ -259,12 +348,14 @@ body.demo.stage-0 #counter,
 body.demo.stage-0 #sidebar,
 body.demo.stage-0 #download,
 body.demo.stage-0 #survey-link,
+body.demo.stage-0 #plan-tray,
 body.demo.stage-0 #confirm { display: none !important; }
 
 /* 段階1：全棟を表示。件数は総数のみ。抽出前は作業UIを隠す */
 body.demo.stage-1 #sidebar,
 body.demo.stage-1 #download,
 body.demo.stage-1 #survey-link,
+body.demo.stage-1 #plan-tray,
 body.demo.stage-1 #confirm { display: none !important; }
 body.demo.stage-1 #counter .arrow,
 body.demo.stage-1 #counter .count.target,

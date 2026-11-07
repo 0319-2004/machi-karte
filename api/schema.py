@@ -7,6 +7,8 @@ candidates / confirmations / evidence と、計測用の open_events を作る�
 - confirmations: 人の確定（opened_at / confirmed_at が「1棟あたり数秒」の出どころ）
 - evidence     : 推定の根拠の実体（POI・画像・版間差分）。candidates.evidence_ids が参照
 - open_events  : 建物を開いた時刻をサーバー側で保持（確定時に opened_at を引く）
+- survey_plans : PC で選んだ調査対象の受け渡し（QR で現地スマホへ渡す）。進捗は
+                 confirmations との突き合わせで数えるので、ここには状態を持たない
 
 使い方:
     uv run python -m api.schema          # テーブルを作る（既存は壊さない）
@@ -85,6 +87,19 @@ _DDL = [
         PRIMARY KEY (building_id, version)
     );
     """,
+    # 調査計画：PC で選んだ棟のまとまりを保存し、QR で現地スマホへ渡す。
+    # building_ids は建物IDの配列。進捗（何棟終わったか）は confirmations との
+    # 突き合わせで都度数えるので、ここには done 等の状態を持たない。
+    """
+    CREATE TABLE IF NOT EXISTS survey_plans (
+        plan_id      VARCHAR PRIMARY KEY,
+        version      VARCHAR,
+        title        VARCHAR,       -- 画面表示用の短い名前（既定は「調査計画（N棟）」）
+        building_ids VARCHAR[],     -- 対象の建物IDの配列
+        created_at   TIMESTAMP DEFAULT now(),
+        created_by   VARCHAR        -- 作成者（任意）
+    );
+    """,
 ]
 
 
@@ -95,7 +110,7 @@ _MIGRATIONS = [
 
 
 def ensure_tables(con: duckdb.DuckDBPyConnection) -> None:
-    """candidates / confirmations / evidence / open_events を作る（冪等）。"""
+    """candidates / confirmations / evidence / open_events / survey_plans を作る（冪等）。"""
     for ddl in _DDL:
         con.execute(ddl)
     for mig in _MIGRATIONS:
@@ -127,7 +142,8 @@ def main() -> None:
         reset_confirmations(con)
         print("確定履歴と計測（confirmations / open_events）を消去した。")
     else:
-        print("テーブルを用意した: candidates / confirmations / evidence / open_events")
+        print("テーブルを用意した: candidates / confirmations / evidence / "
+              "open_events / survey_plans")
     con.close()
 
 

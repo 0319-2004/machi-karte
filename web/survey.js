@@ -159,7 +159,7 @@ async function updateMiniRoute() {
 // 俯瞰地図：訪問順の「次に行く棟」（未調査の先頭）への経路
 async function updatePlanRoute() {
   if (!planMap || !planOrder.length) return;
-  const id = planOrder.find((x) => !lsGet(LS.draft(x), {}).done) || planOrder[0];
+  const id = planOrder.find((x) => !isDoneId(x)) || planOrder[0];
   if (!planMeMarker) planMeMarker = new maplibregl.Marker({ element: meEl() });
   await renderWalkRoute(planMap, planMeMarker, id, document.getElementById("plan-route"), false);
 }
@@ -168,6 +168,10 @@ let usageCodes = [];
 let targets = [];                 // 全調査対象（優先度順、coords つき）
 let targetsById = {};
 let guidanceById = {};
+// QR で受け取った調査計画（?plan=<id>）。無ければ従来どおりスマホだけで選ぶ流れ。
+const planId = new URLSearchParams(location.search).get("plan");
+let planInfo = null;              // 読み込んだ計画（title / building_ids / done_ids）
+let planServerDone = new Set();   // サーバーで確定済み（この端末に下書きが無くても「調査済」）
 let selected = lsGet(LS.selected, []);
 let displayLimit = 100;           // 地図に出す上位N（「もっと表示」で増やす）
 let targetTotal = 0;
@@ -205,6 +209,7 @@ async function loadAll() {
   ]);
   if (!targetTotal) targetTotal = targets.length;
   for (const t of targets) targetsById[t.id] = t;
+  await loadPlan();                 // ?plan=<id> があれば計画を読み込み、選択に反映
   try {
     const un = await fetch("/api/unresolved").then((r) => r.json());
     for (const g of un.groups || []) {
@@ -216,6 +221,52 @@ async function loadAll() {
   initPickMap();
   renderPickList();
   updateSelbar();
+  // 計画を読み込めたら、その棟一覧（調査プラン）をそのまま開く。
+  // 失敗時・無指定時は従来どおり「地図で選ぶ」から始める。
+  if (planInfo && selected.length) startFromPlan();
+}
+
+// 調査計画（QR 受け渡し）を読み込み、計画の棟を選択に入れる。
+async function loadPlan() {
+  if (!planId) return;
+  try {
+    const res = await fetch(`/api/plans/${encodeURIComponent(planId)}`);
+    if (!res.ok) throw new Error(String(res.status));
+    const p = await res.json();
+    planInfo = p;
+    planServerDone = new Set(p.done_ids || []);
+    // 計画の棟のうち、調査対象に存在するものだけを順序を保って選択に入れる
+    selected = (p.building_ids || []).filter((id) => targetsById[id]);
+    lsSet(LS.selected, selected);
+  } catch {
+    planInfo = null;               // 読み込み失敗：通常の選択フローにフォールバック
+  }
+}
+
+// 指定棟が「調査済み」か（この端末の下書き done か、サーバーで確定済み）
+function isDoneId(id) {
+  return planServerDone.has(id) || lsGet(LS.draft(id), {}).done;
+}
+
+// 計画の棟一覧（調査プラン）をそのまま開く（start-btn と同じ流れ）
+function startFromPlan() {
+  document.getElementById("view-pick").classList.add("hidden");
+  document.getElementById("view-plan").classList.remove("hidden");
+  initPlanMap();
+  mode = "priority"; setModeButtons();
+  buildPlan();
+  showPlanBanner();
+}
+
+// 計画バナー（名前・進捗）を調査プラン画面に出す
+function showPlanBanner() {
+  const el = document.getElementById("plan-banner");
+  if (!el) return;
+  if (!planInfo) { el.classList.add("hidden"); return; }
+  const done = selected.filter(isDoneId).length;
+  el.innerHTML = `📋 <b>${planInfo.title}</b>（計画 ${selected.length}棟）` +
+    `　<span class="pb-prog">${done} / ${selected.length} 棟 調査済み</span>`;
+  el.classList.remove("hidden");
 }
 
 // --- 1. 選択（地図が主役） --------------------------------------------------
@@ -447,6 +498,8 @@ document.getElementById("dl-open").addEventListener("click", async () => {
     document.getElementById("dl-csv").classList.toggle("disabled", dis);
     document.getElementById("dl-geojson").classList.toggle("disabled", dis);
     document.getElementById("dl-report").disabled = dis;
+    const share = document.getElementById("dl-share");
+    if (share && !share.classList.contains("hidden")) share.disabled = dis;
   } catch { document.getElementById("dl-count").textContent = "件数を取得できませんでした。"; }
 });
 document.getElementById("dl-close").addEventListener("click", () => dlPanel.classList.add("hidden"));
@@ -465,6 +518,41 @@ document.getElementById("dl-report").addEventListener("click", async (e) => {
   } catch { btn.textContent = "生成に失敗しました"; }
   setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 2500);
 });
+
+// 共有：更新候補（CSV / GeoJSON）を Web Share API でファイル共有する。
+// 対応端末（ファイル共有が可能）でだけボタンを出す。非対応ならダウンロードのみ。
+function canShareFiles() {
+  try {
+    return !!(navigator.canShare && navigator.canShare(
+      { files: [new File(["x"], "t.txt", { type: "text/plain" })] }));
+  } catch { return false; }
+}
+const dlShare = document.getElementById("dl-share");
+if (canShareFiles()) {
+  dlShare.classList.remove("hidden");
+  dlShare.addEventListener("click", async () => {
+    const old = dlShare.textContent; dlShare.disabled = true; dlShare.textContent = "準備中…";
+    try {
+      const [csv, geo] = await Promise.all([
+        fetch("/api/export.csv").then((r) => r.blob()),
+        fetch("/api/export.geojson").then((r) => r.blob()),
+      ]);
+      const files = [
+        new File([csv], "update_candidates_13104.csv", { type: "text/csv" }),
+        new File([geo], "update_candidates_13104.geojson", { type: "application/geo+json" }),
+      ];
+      const payload = { title: "まちカルテ 更新候補",
+        text: "まちカルテで確定した更新候補（CSV / GeoJSON）です。" };
+      if (navigator.canShare && navigator.canShare({ ...payload, files })) {
+        await navigator.share({ ...payload, files });
+      } else {
+        await navigator.share({ ...payload, files: [files[0]] });  // 複数不可なら CSV のみ
+      }
+    } catch (e) {
+      if (!(e && e.name === "AbortError")) alert("共有できませんでした");
+    } finally { dlShare.disabled = false; dlShare.textContent = old; }
+  });
+}
 
 // 下部：選択中 N棟
 function updateSelbar() {
@@ -676,16 +764,16 @@ function renderPlanGroups() {
     grp.forEach((id) => {
       n++;
       const t = targetsById[id] || { id };
-      const draft = lsGet(LS.draft(id), {});
+      const done = isDoneId(id);
       const h = t.height_m != null ? `${t.height_m.toFixed(0)}m` : "高さ不明";
       const dist = userPos ? fmtDist(distM(userPos, t)) : "";
       const item = document.createElement("div");
-      item.className = "grp-item" + (draft.done ? " done" : "");
+      item.className = "grp-item" + (done ? " done" : "");
       item.innerHTML =
         `<div class="num" style="background:${color}">${n}</div>` +
         `<div class="gi-main"><div class="gi-id">${id}</div>` +
         `<div class="gi-meta">${h}・${t.usage_label || "用途不明"}` +
-        `${draft.done ? ' <span class="gi-done">✓調査済</span>' : ""}</div></div>` +
+        `${done ? ' <span class="gi-done">✓調査済</span>' : ""}</div></div>` +
         (dist ? `<div class="gi-dist">${dist}</div>` : "");
       item.addEventListener("click", () => openInput(planOrder.indexOf(id)));
       wrap.appendChild(item);
@@ -743,6 +831,7 @@ document.getElementById("input-back").addEventListener("click", () => {
   document.getElementById("view-plan").classList.remove("hidden");
   renderPlanGroups();                       // 調査済マークを反映
   updatePlanRoute();                        // 次に行く棟が変わっていれば経路も更新
+  showPlanBanner();                         // 進捗（N/M 調査済み）を更新
   setTimeout(() => planMap && planMap.resize(), 50);
 });
 // 入力画面の「ここへ行く」：いま開いている棟へ徒歩ルートを出す
@@ -1017,8 +1106,8 @@ function showErr(msg) {
 }
 function gotoNextUndone() {
   for (let j = idx + 1; j < planOrder.length; j++)
-    if (!lsGet(LS.draft(planOrder[j]), {}).done) return loadBuilding(j);
-  const k = planOrder.findIndex((id) => !lsGet(LS.draft(id), {}).done);
+    if (!isDoneId(planOrder[j])) return loadBuilding(j);
+  const k = planOrder.findIndex((id) => !isDoneId(id));
   if (k >= 0) loadBuilding(k);
   else { alert("選んだ棟をすべて調査しました。お疲れさまでした。");
          document.getElementById("input-back").click(); }

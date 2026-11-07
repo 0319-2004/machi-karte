@@ -89,6 +89,7 @@
     <a id="dl-csv" href="/api/export.csv" download>CSV</a>
     <a id="dl-geojson" href="/api/export.geojson" download>GeoJSON</a>
     <button id="dl-report" title="確定済みから調査レポート（Markdown）を生成してダウンロード">レポート生成</button>
+    <button id="dl-share" class="hidden" title="更新候補（CSV/GeoJSON）を共有する">共有</button>
   </div>
 
   <a id="attr-link" href="/attribution">帰属表示</a>
@@ -96,6 +97,41 @@
      style="position:fixed;left:10px;bottom:10px;z-index:5;background:#e64a19;color:#fff;
             padding:9px 14px;border-radius:20px;font:600 13px system-ui,sans-serif;
             text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,.3)">📱 現地調査</a>
+
+  <!-- 調査計画トレイ（PC で選んだ棟をまとめ、QR で現地スマホへ渡す） -->
+  <div id="plan-tray" class="empty">
+    <div class="pt-head" id="pt-head" role="button" title="計画に入れた棟の一覧">
+      📋 調査計画 <b id="pt-count">0</b> 棟 <span id="pt-caret">▸</span>
+    </div>
+    <ul id="pt-list" class="hidden"></ul>
+    <div class="pt-actions">
+      <button id="pt-save" disabled title="選んだ棟を保存し、QR コードで現地スマホへ渡す">QRで渡す</button>
+      <button id="pt-plans" title="保存済みの調査計画と進捗を見る">進捗</button>
+    </div>
+  </div>
+
+  <!-- 調査計画を保存したあとの受け渡し（計画ID・URL・QR コード） -->
+  <div id="plan-modal" class="hidden">
+    <div class="pm-box">
+      <button id="pm-close" title="閉じる">×</button>
+      <h3>調査計画を保存しました</h3>
+      <p class="pm-title" id="pm-title"></p>
+      <p class="pm-lead">スマホのカメラで QR を読み取ると、この計画の棟が現地調査モードで開きます。</p>
+      <div class="pm-qr" id="pm-qr"></div>
+      <div class="pm-url"><input id="pm-url" type="text" readonly />
+        <button id="pm-copy" title="URL をコピー">コピー</button></div>
+      <p class="pm-note">進捗（何棟終わったか）は「調査計画 → 進捗」で確認できます。</p>
+    </div>
+  </div>
+
+  <!-- 保存済みの調査計画と進捗（何棟中何棟終わったか） -->
+  <div id="plans-modal" class="hidden">
+    <div class="pl-box">
+      <button id="pl-close" title="閉じる">×</button>
+      <h3>調査計画の進捗</h3>
+      <div id="pl-list"></div>
+    </div>
+  </div>
 
   <!-- 確度が低い属性を「そのまま確定」しようとしたときの確認ダイアログ -->
   <div id="lowconf-modal" class="hidden">
@@ -112,6 +148,8 @@
   </div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <!-- QR コード生成（MIT, Kazuhiko Arase）。ローカル配信＝CDN に依存しない -->
+  <script src="/vendor/qrcode/qrcode.js"></script>
   <script src="/app.js"></script>
   <script src="/demo.js"></script>
 </body>

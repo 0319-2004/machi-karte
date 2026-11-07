@@ -16,6 +16,25 @@
 
 ---
 
+## 2026-11-07 調査計画の受け渡し（QRコード）と共有ボタン（Web Share API）
+
+- 背景 / きっかけ：PC で絞り込んだ棟を現地スマホへ渡す導線が無く、スマホ側で選び直していた。また出力（CSV/GeoJSON/レポート）を人に渡すのが「ダウンロードしてから手作業」だった。この2つを埋める。
+- 判断（1：調査計画の受け渡し）：
+  - **保存**：`survey_plans`（`plan_id` / `version` / `title` / `building_ids VARCHAR[]` / `created_at` / `created_by`）を新設し、`POST /api/plans` で保存。実在する建物IDだけに絞り、重複は入力順を保って除く（1件も残らなければ 400）。`plan_id` は `secrets.token_hex(4)`（8桁、衝突時は引き直し）。
+  - **進捗は状態を持たない**：`survey_plans` に done 等を持たず、`GET /api/plans`（一覧）/`GET /api/plans/{id}`（個別）で **`confirmations` との突き合わせ**で都度数える（現地 onsite・机上 desk どちらの確定でも「調査済」）。二重管理・不整合を避けるため。
+  - **受け渡しURLはフロントで作る**：サーバーは `plan_id` だけ返し、ブラウザが `location.origin + "/survey.html?plan=" + id` を組み立てる。LAN/トンネル越しでも、PC がいま使っているオリジンをそのままスマホへ渡せる（サーバーは自分の外部ホスト名を知らないため）。
+  - **QR はローカルライブラリ**：`qrcode-generator`（MIT, © Kazuhiko Arase）を `web/vendor/qrcode/qrcode.js` に同梱（約56KB）。CDN 非依存（デモ中に通信が不安定でも動く＝MediaPipe と同方針）。QR には**受け渡しURL（計画IDのみ）**を載せ、建物属性や位置情報は載せない。
+  - **選択は既存の localStorage に合流**：PC 側の計画選択は現地調査モードと同じ `mk.survey.selected` に持つ。確認カードの「＋ 調査計画に追加」、現地確認パネルの各区分「＋ この区分を調査計画に追加」、低確度ダイアログの「現地確認リストに追加」がすべて同じトレイ（左下「📋 調査計画」）に溜まる。
+  - **スマホ側**：`survey.html?plan=<id>` で `GET /api/plans/{id}` を読み、計画の棟（対象に実在するものだけ）を選択に入れて**そのまま調査プランを開く**。計画名・進捗（N/M 調査済み）をバナー表示。サーバーの `done_ids` と端末の下書き done の **OR** で「調査済」を判定。**計画指定が無ければ従来どおり**「地図で選ぶ」から始まる（スマホだけで選ぶ流れは不変）。
+- 判断（2：共有ボタン）：更新候補のダウンロード（CSV/GeoJSON/レポート）の横に「共有」を追加。`navigator.share({files})` で **CSV と GeoJSON のファイルそのもの**を共有する。**`navigator.canShare({files})` が真の端末でだけボタンを出す**（非対応はダウンロードのみ）。複数ファイル不可なら CSV のみにフォールバック、ユーザーが閉じた（AbortError）ときは無言。`map.html`・`survey.html` の両方に置いた。
+- 制約の遵守：QR ライブラリは MIT（`docs/licenses.md`・`docs/attribution.md`・`web/vendor/qrcode/README.md` に帰属）。QR・URL に位置情報や属性を載せない。公式データ非上書きの原則は不変（計画は候補・確定に触れない）。
+- 動作確認（localhost、実ブラウザ＝ヘッドレス Chrome を CDP で駆動。WebGL は SwiftShader）：
+  - PC：計画トレイに2棟→「QRで渡す」→ `plan-modal` が開き URL `…/survey.html?plan=<id>`・**QR の SVG**・タイトル表示。「進捗」で一覧（`0 / 2 棟`）。共有ボタンはこの Chrome で表示（canShare=真）。アプリ由来のコンソールエラー 0。
+  - スマホ：`survey.html?plan=<id>` で**調査プランに自動遷移**、バナー「📋 …（計画 2棟）　0 / 2 棟 調査済み」、グループに2棟。`mk.survey.selected` に2棟。計画指定なしでは従来どおり「地図で選ぶ」から開始。
+  - 往復：`POST /api/survey`（1棟 onsite 確定）→ `GET /api/plans/{id}` が `done 1/2`・`done_ids` に反映。無効IDの除外（3/4）・空body 400・未知計画 404 も確認。
+  - 検証で作った計画・確定はライブ DB から削除して元に戻した（desk 確定 41 件・対象棟は不変）。サーバーは `make serve`（uvicorn --reload）で再起動済み。
+- 影響範囲：`api/schema.py`（`survey_plans` 追加）、`api/main.py`（`/api/plans` 3本・`_plan_done_ids`・`_new_plan_id`）、`web/map.html`・`web/app.js`・`web/style.css`（計画トレイ・QR/進捗モーダル・共有）、`web/survey.html`・`web/survey.js`（計画読み込み・バナー・共有）、`web/vendor/qrcode/`（新規・MIT）、`docs/attribution.md`・`docs/licenses.md`・`web/README.md`。既存の推定・確定・出力・計測は不変。
+
 ## 2026-11-07 Phase 10 評価レポート：make eval で docs/results.md を再生成
 
 - 背景 / きっかけ：デモと README に載せる数字を、推測なし・出典つきで1枚にまとめ、再現可能にしたい。

@@ -32,6 +32,7 @@
 | --- | --- | --- | --- |
 | MapLibre GL JS | BSD-3-Clause | CDN（unpkg） | 地図表示 |
 | @mediapipe/tasks-vision（BlazeFace） | Apache-2.0 | `web/vendor/` に同梱（オフライン用） | 現地写真の顔の自動ぼかし（端末内推論） |
+| qrcode-generator（Kazuhiko Arase） | MIT | `web/vendor/qrcode/` に同梱（CDN 非依存） | 調査計画の受け渡し URL を QR コード化（PC→現地スマホ） |
 
 ## 外部サービス
 
