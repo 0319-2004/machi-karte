@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-11-07 外部地図を Google マップに統一（Apple マップの複数目的地・不安定を回避）
+
+- 背景 / きっかけ：現地調査の「ここへ行く」で、グループ（複数棟）を Google マップに渡すと複数経由地がきれいに出るが、**Apple マップだとうまくいかないことがある**（URLスキームが複数目的地に非対応で、1棟でも挙動が不安定なことがある）。
+- 判断：**端末を問わず Google マップに統一**。`navDirectionsUrl` の iOS→Apple マップ分岐を外し、単一・グループとも `https://www.google.com/maps/dir/?api=1&...&travelmode=walking` に統一。Google マップ未インストールの iOS でも Safari で地図が開く（止まらない）。`isIOS` は音声入力（Web Speech/OS口述）の分岐でのみ引き続き使用。
+- 制約の遵守：出発地（現在地）は渡さず外部アプリ任せ（位置を保存しない方針は不変）。アプリ内の OSRM 経路線は別機能で不変。これは 2026-11-07「現地調査に『ここへ行く』」の iOS=Apple／他=Google の分岐を上書きする。
+- 動作確認：`navDirectionsUrl` が常に Google の URL を返すこと、`maps.apple` 参照が survey.js から無くなったことを確認（`node --check` OK）。
+- 影響範囲：`web/survey.js`（`navDirectionsUrl`・関連コメント）のみ。
+
 ## 2026-11-07 デモ：抽出前にハイライト（計画の紫・確定の緑・写真の点）が見えていたのを修正
 
 - 背景 / きっかけ：配布デモ（map.html, body.demo）で「街名入力→全棟灰色→抽出で橙が浮かぶ」演出の**抽出前（段階0/1）から、計画の紫（`b-plan`）・現地確定の緑（`b-done-onsite`）・写真のシアン点（`b-photo`）が見えていた**。これらはロード時にフィルタが入る（`planSel`／`loadConfirmed`／`loadPhotos`）ため、全棟灰色の演出が崩れていた。

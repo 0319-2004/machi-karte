@@ -37,9 +37,9 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 // アプリ内に経路は描かない。渡すのは目的地（建物の重心）だけ。出発地は渡さず、
 // 現在地は外部アプリ側（Apple/Google マップ）が扱う。こちらでは位置情報を保存しない。
 function navDirectionsUrl(lat, lon) {
-  // iOS は Apple マップ、それ以外は Google マップ。どちらも徒歩（walking）指定。
-  // 端末判定は既存の isIOS（iPhone/iPad/iPod・iPadOS 対応）を使う。
-  if (isIOS) return `https://maps.apple.com/?daddr=${lat},${lon}&dirflg=w`;
+  // 外部地図は端末を問わず Google マップに統一する（徒歩＝walking 指定）。
+  // Apple マップは複数目的地（グループ）に非対応で、1棟でも挙動が不安定なことがあるため。
+  // Google マップ未インストールの iOS でも Safari で地図が開く（止まらない）。
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
 }
 function goTo(id) {
@@ -50,13 +50,13 @@ function goTo(id) {
 }
 
 // グループの全棟を外部地図に渡す（訪問順に複数経由地で表示）。
-// 複数経由地は Google マップが確実（Apple マップの URL スキームは複数目的地に非対応）なので、
-// グループ単位は端末を問わず Google マップを使う。出発地は省略し外部アプリの現在地に任せる。
+// 外部地図は端末を問わず Google マップに統一（Apple マップは複数目的地に非対応）。
+// 出発地は省略し外部アプリの現在地に任せる。
 const NAV_MAX_STOPS = 10;   // Google マップのルートURLで確実に開ける経由地＋目的地の上限
 function navGroupUrl(points) {
   let pts = points.filter((p) => p && p.lat != null && p.lon != null);
   if (!pts.length) return null;
-  if (pts.length === 1) return navDirectionsUrl(pts[0].lat, pts[0].lon);  // 1棟は従来どおり端末別
+  if (pts.length === 1) return navDirectionsUrl(pts[0].lat, pts[0].lon);  // 1棟も Google
   // 経由地が多すぎると URL ごと弾かれるので、訪問順の先頭から上限まで渡す
   // （同じ 200m グループ内なので、現地に着けば残りはアプリ内のプランで辿れる）
   pts = pts.slice(0, NAV_MAX_STOPS);
