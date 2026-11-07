@@ -1,4 +1,4 @@
-.PHONY: ingest ingest-2023 schema estimate version-diff geojson serve eval export test \
+.PHONY: ingest ingest-2023 schema estimate version-diff geojson serve tunnel eval export test \
         reset-confirmations demo-reset pipeline claude-infer claude-eval onsite
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
@@ -29,6 +29,11 @@ geojson:
 # FastAPI を起動する（http://localhost:8000/ 。初回は geojson を自動生成）
 serve:
 	uv run uvicorn api.main:app --reload --port 8000
+
+# 現地デモ用：Macを眠らせず、サーバー＋HTTPSトンネルを張ってスマホ用URLを表示する。
+# Macを外へ持ち出し、スマホのテザリング等につないで実機デモ・撮影する想定。Ctrl-C で停止。
+tunnel:
+	bash scripts/field_demo.sh
 
 # MediaPipe の WASM を取得（web/vendor/mediapipe/wasm/、git 管理外・各約9MB）。
 # 顔の自動ぼかしを使うなら一度だけ実行。未取得でも手塗りにフォールバックする。
