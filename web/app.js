@@ -246,12 +246,14 @@ function addBuildingLayers() {
     },
   });
   // 調査計画に入れた棟を紫でハイライト（選択中だと一目でわかるように）。
+  // b-tgt と同じ外形・同じ高さだと真上（ピッチ0）で Z ファイティングして橙に負け、
+  // 色が変わって見えない。少し高く・不透明にして確実に上へ出す。
   map.addLayer({
     id: "b-plan", type: "fill-extrusion", source: "buildings",
     filter: ["in", ["get", "id"], ["literal", planSel]],
     paint: {
-      "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
-      "fill-extrusion-color": COLOR_PLAN, "fill-extrusion-opacity": 0.95,
+      "fill-extrusion-height": ["+", HEIGHT_EXPR, 4], "fill-extrusion-base": 0,
+      "fill-extrusion-color": COLOR_PLAN, "fill-extrusion-opacity": 1,
     },
   });
   // 現地確認が必要な棟（判断不能の区分）のハイライト。既定は非表示（空フィルタ）。
@@ -828,21 +830,22 @@ async function loadPlans() {
     const r = mapEl.getBoundingClientRect();
     return { x: ev.clientX - r.left, y: ev.clientY - r.top };
   };
+  const HINT_DEFAULT = "通常ドラッグで移動／Shift＋ドラッグで囲んで選択（真上から）";
   function setMode(v) {
     on = v;
     btn.classList.toggle("on", on);
     btn.textContent = on ? "✓ 囲みモード中（解除）" : "⬚ 囲んで計画に追加";
     hint.classList.toggle("hidden", !on);
-    hint.textContent = "ドラッグで囲んだ調査対象を計画に追加します";
+    hint.textContent = HINT_DEFAULT;
     mapEl.classList.toggle("region-on", on);
     if (on) {
-      // ドラッグを矩形選択に使うため、地図のパン/ボックスズームを止める
-      map.dragPan.disable(); map.boxZoom.disable();
+      // 移動はできるようにパンは残し、Shift＋ドラッグの範囲選択と衝突する boxZoom だけ止める
+      map.boxZoom.disable();
       // 囲みやすいよう、真上からの俯瞰（ピッチ0・北上）へギュインと切り替える
       savedCam = { pitch: map.getPitch(), bearing: map.getBearing() };
       map.easeTo({ pitch: 0, bearing: 0, duration: 650, easing: (t) => t * (2 - t) });
     } else {
-      map.dragPan.enable(); map.boxZoom.enable();
+      map.boxZoom.enable(); map.dragPan.enable();
       // 解除したら元の3D視点に戻す
       if (savedCam) {
         map.easeTo({ pitch: savedCam.pitch, bearing: savedCam.bearing,
@@ -855,8 +858,10 @@ async function loadPlans() {
   btn.addEventListener("click", () => setMode(!on));
 
   mapEl.addEventListener("pointerdown", (ev) => {
-    if (!on) return;
+    // Shift＋ドラッグのときだけ範囲選択。通常ドラッグはパン（別の地点を見られる）。
+    if (!on || !ev.shiftKey) return;
     ev.preventDefault();
+    map.dragPan.disable();            // この選択ドラッグの間だけパンを止める
     try { mapEl.setPointerCapture(ev.pointerId); } catch {}
     start = pt(ev);
     box.style.display = "block";
@@ -874,16 +879,19 @@ async function loadPlans() {
   mapEl.addEventListener("pointerup", (ev) => {
     if (!on || !start) return;
     const p = pt(ev), s = start; start = null; box.style.display = "none";
+    map.dragPan.enable();             // 選択が終わったらパンを戻す
     const x0 = Math.min(s.x, p.x), y0 = Math.min(s.y, p.y);
     const x1 = Math.max(s.x, p.x), y1 = Math.max(s.y, p.y);
-    if (x1 - x0 < 5 && y1 - y0 < 5) return;   // タップ扱い（誤爆回避）
+    if (x1 - x0 < 5 && y1 - y0 < 5) return;   // クリック扱い（誤爆回避）
     const feats = map.queryRenderedFeatures([[x0, y0], [x1, y1]], { layers: ["b-tgt"] });
     const ids = [...new Set(feats.map((f) => f.properties.id))];
     if (!ids.length) { hint.textContent = "囲んだ範囲に調査対象はありませんでした"; return; }
     addManyToPlan(ids);
-    hint.textContent = `${ids.length} 棟を調査計画に追加しました（左下トレイ →「QRで渡す」）`;
+    hint.textContent = `${ids.length} 棟を追加しました（合計は左下トレイ →「QRで渡す」）`;
   });
-  mapEl.addEventListener("pointercancel", () => { start = null; box.style.display = "none"; });
+  mapEl.addEventListener("pointercancel", () => {
+    start = null; box.style.display = "none"; map.dragPan.enable();
+  });
 })();
 
 // --- 共有（更新候補 CSV/GeoJSON を Web Share API でファイル共有） -----------
