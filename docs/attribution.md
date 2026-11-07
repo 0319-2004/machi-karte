@@ -8,7 +8,7 @@
 | OpenStreetMap | © OpenStreetMap contributors（ODbL） |
 | Overture Maps | CDLA Permissive 2.0。Foursquare 由来の項目は NOTICE を添える |
 | 東京都デジタルツイン | CC BY 4.0 |
-| 国土地理院 | 出典明示（地理院タイル） |
+| 国土地理院 | 出典明示（地理院タイル。調査プランのグループ地名は地理院リバースジオコーダ） |
 | OSRM | BSD-2-Clause。現地調査の徒歩経路の取得に使用（公開サーバー `router.project-osrm.org`。本番は自前運用）。経路データは OpenStreetMap（ODbL）由来 |
 | MediaPipe Face Detector | Apache-2.0（© The MediaPipe Authors）。現地写真の顔の自動ぼかしに使用。モデルは BlazeFace。推論は端末内で行い、画像はサーバーに送らない |
 | qrcode-generator | MIT（© 2009 Kazuhiko Arase）。調査計画の受け渡し URL を QR コード化するのに使用。CDN ではなく自サーバー（`/vendor/qrcode/`）から配信 |

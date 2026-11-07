@@ -28,7 +28,8 @@ const GSI = {
 const COLOR_TGT = "#ff6a2b", COLOR_SEL = "#43d19e";
 const GROUP_COLORS = ["#2ad4e8", "#ff6a2b", "#b06bff", "#43d19e", "#ffca3a",
                       "#5ea0ff", "#ff6b9d", "#7ee787"];
-const GROUP_RADIUS_M = 200;
+const GROUP_RADIUS_M = 200;   // グループにまとめる半径（シードからの距離）
+const GROUP_MAX = 10;         // 1グループの上限棟数（Google の経由地上限 NAV_MAX_STOPS と同じ）
 
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -207,8 +208,11 @@ let selMode = null;   // 範囲選択モード："box"（四角）| "lasso"（�
 // プラン/入力
 let mode = "priority";            // priority | near
 let userPos = null;               // {lon,lat} | null（近い順を押したときだけ）
-let planGroups = [];              // [[id,...], ...]
+let planGroups = [];              // [[id,...], ...]（グループ＝訪問順、各グループ内も訪問順）
 let planOrder = [];               // グループを平らにした訪問順
+let planNum = {};                 // 建物ID → 通し番号（グループの切れ目でも連番）
+let planGroupDist = [];           // グループ内の移動距離（直線合計）
+const areaNameCache = {};         // 地名（地理院 reverse geocode）のキャッシュ
 let idx = 0;
 
 // --- 距離 -------------------------------------------------------------------
@@ -659,17 +663,39 @@ function twoOpt(start, pts) {
 }
 function optimizePath(start, pts) { return twoOpt(start, nearestNeighbor(start, pts)); }
 
-// 半径200m のグループ（membership のみ。順番は後で最適化する）
-function groupMembership(ids) {
+// グループ分け（membership のみ。順番は後で最適化する）。
+// シード＝優先度が最も高い未割当棟。そこから半径内の棟を「近い順」に上限 GROUP_MAX まで入れる。
+// 旧実装は「アンカーから半径内を全部」で上限が無く、密集域で1グループが肥大していた
+// （例：46棟→[35,6,5]）。上限で切ることで均されたグループ（例：46棟→[10,10,10,10,6]）になる。
+function buildGroups(ids) {
   const rest = ids.slice(), groups = [];
   while (rest.length) {
-    const anchor = rest.shift(); const grp = [anchor];
-    for (let i = rest.length - 1; i >= 0; i--)
-      if (distM(targetsById[anchor], targetsById[rest[i]]) <= GROUP_RADIUS_M)
-        grp.push(rest.splice(i, 1)[0]);
-    groups.push(grp);
+    const seed = rest[0], s = targetsById[seed];
+    const within = rest
+      .map((id) => ({ id, d: distM(s, targetsById[id]) }))
+      .filter((x) => x.d <= GROUP_RADIUS_M)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, GROUP_MAX)
+      .map((x) => x.id);
+    const set = new Set(within);
+    for (let i = rest.length - 1; i >= 0; i--) if (set.has(rest[i])) rest.splice(i, 1);
+    groups.push(within);
   }
   return groups;
+}
+
+// 地名（町丁目）を地理院 reverse geocode で引く。失敗/オフラインは null（番号にフォールバック）。
+function areaKey(lon, lat) { return lon.toFixed(3) + "," + lat.toFixed(3); }
+async function fetchAreaName(lon, lat) {
+  const k = areaKey(lon, lat);
+  if (k in areaNameCache) return areaNameCache[k];
+  try {
+    const u = `https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat=${lat}&lon=${lon}`;
+    const j = await fetch(u).then((r) => r.json());
+    const nm = j && j.results && j.results.lv01Nm;
+    areaNameCache[k] = nm && nm !== "−" ? nm : null;
+  } catch { areaNameCache[k] = null; }
+  return areaNameCache[k];
 }
 function centroid(ids) {
   let lon = 0, lat = 0, n = 0;
@@ -689,13 +715,13 @@ function buildPlan() {
     ? { lon: userPos.lon, lat: userPos.lat }
     : { lon: targetsById[byPriority[0]].lon, lat: targetsById[byPriority[0]].lat };
 
-  // 少数（Google に一度で渡せる上限＝NAV_MAX_STOPS 以下）は距離で分けず1グループに
-  // まとめ、1本のルートで全棟を回れるようにする。多いときだけ 200m でグループ化する。
-  const groups = byPriority.length <= NAV_MAX_STOPS
+  // まずグループを作る（少数は距離で分けず1グループ。多いときだけ半径＋上限でグループ化）。
+  // その後、グループ間の順番を近い順に、各グループ内の訪問順も最適化する。
+  const groups = byPriority.length <= GROUP_MAX
     ? [byPriority.slice()]
-    : groupMembership(byPriority);
+    : buildGroups(byPriority);
   const gpts = groups.map((g) => ({ members: g, ...centroid(g) }));
-  const gorder = optimizePath(start, gpts);
+  const gorder = optimizePath(start, gpts);   // 近いグループから回る
 
   // 各グループ内も最適化（入口＝直前グループの出口、最初は起点）
   let entry = start; planGroups = [];
@@ -706,6 +732,16 @@ function buildPlan() {
     entry = ord[ord.length - 1];
   }
   planOrder = planGroups.flat();
+
+  // 通し番号（グループの切れ目でも連番）。地図・一覧・入力で同じ番号を使う。
+  planNum = {}; planOrder.forEach((id, i) => { planNum[id] = i + 1; });
+
+  // グループ内の移動距離（連続する棟の直線距離の合計）
+  planGroupDist = planGroups.map((grp) => {
+    let d = 0;
+    for (let i = 0; i < grp.length - 1; i++) d += distM(targetsById[grp[i]], targetsById[grp[i + 1]]);
+    return d;
+  });
 
   // 総移動距離（起点→各棟の直線距離の合計）
   const seq = [start, ...planOrder.map((id) => targetsById[id])];
@@ -730,6 +766,30 @@ function initPlanMap() {
     container: "plan-map", style: GSI, center: [139.6917, 35.6896], zoom: 13,
     attributionControl: false,
   });
+  // 重なったピンのずらし（拡大すれば自然に離れ、近いままなら少し放射状にずらす）
+  planMap.on("zoomend", declutterPins);
+  planMap.on("moveend", declutterPins);
+}
+
+// 画面上で重なるピンを放射状に少しずらして番号を読めるようにする（setOffset）。
+// 拡大して重ならなくなれば自動でオフセット0に戻る。
+function declutterPins() {
+  if (!planMap || !planMarkers.length) return;
+  const cell = 30;   // この画素以内に集まるピンを「重なり」とみなす
+  const buckets = new Map();
+  for (const m of planMarkers) {
+    const p = planMap.project(m.getLngLat());
+    const key = Math.round(p.x / cell) + "," + Math.round(p.y / cell);
+    (buckets.get(key) || buckets.set(key, []).get(key)).push(m);
+  }
+  for (const arr of buckets.values()) {
+    if (arr.length === 1) { arr[0].setOffset([0, 0]); continue; }
+    const r = 13 + arr.length * 1.6;
+    arr.forEach((m, j) => {
+      const th = (2 * Math.PI * j) / arr.length - Math.PI / 2;
+      m.setOffset([Math.cos(th) * r, Math.sin(th) * r]);
+    });
+  }
 }
 let planMarkers = [];
 let planPopup = null;
@@ -751,15 +811,13 @@ function renderPlanMap() {
   const run = () => {
     clearPlanMarkers();
     const bounds = new maplibregl.LngLatBounds();
-    let n = 0;
     planGroups.forEach((grp, gi) => {
       const color = GROUP_COLORS[gi % GROUP_COLORS.length];
       grp.forEach((id) => {
         const t = targetsById[id]; if (!t) return;
-        n++;
         const el = document.createElement("div");
         el.className = "pin"; el.style.background = color; el.style.cursor = "pointer";
-        el.innerHTML = `<span>${n}</span>`;
+        el.innerHTML = `<span>${planNum[id]}</span>`;   // 通し番号（連番）
         el.addEventListener("click", (e) => { e.stopPropagation(); openPlanPopup(id, t.lon, t.lat); });
         planMarkers.push(new maplibregl.Marker({ element: el, anchor: "bottom" })
           .setLngLat([t.lon, t.lat]).addTo(planMap));
@@ -769,6 +827,7 @@ function renderPlanMap() {
     // 現在地の点は updatePlanRoute 側の planMeMarker が担当（経路取得で得た位置を使う）
     if (userPos) bounds.extend([userPos.lon, userPos.lat]);
     if (!bounds.isEmpty()) planMap.fitBounds(bounds, { padding: 46, maxZoom: 16, duration: 600 });
+    setTimeout(declutterPins, 650);   // fitBounds 後に重なりをほどく
   };
   if (planMap.loaded()) run(); else planMap.once("load", run);
 }
@@ -776,21 +835,34 @@ function renderPlanMap() {
 function renderPlanGroups() {
   const box = document.getElementById("plan-groups");
   box.innerHTML = "";
-  let n = 0;
   planGroups.forEach((grp, gi) => {
     const color = GROUP_COLORS[gi % GROUP_COLORS.length];
+    const c = centroid(grp);
     const wrap = document.createElement("div"); wrap.className = "group";
     const head = document.createElement("div"); head.className = "group-head";
+    // 代表位置（地名）：キャッシュがあれば即表示、無ければ番号で出して後から地名に差し替え
+    const cached = areaNameCache[areaKey(c.lon, c.lat)];
+    const title = cached ? `${cached} 付近` : `グループ${gi + 1}`;
+    const dkm = planGroupDist[gi] || 0;
+    const dtxt = grp.length > 1
+      ? `・グループ内 約${dkm < 1000 ? Math.round(dkm / 10) * 10 + "m" : (dkm / 1000).toFixed(1) + "km"}`
+      : "";
     head.innerHTML = `<span class="gdot" style="background:${color}"></span>` +
-      `グループ${gi + 1}（${grp.length}棟）` +
+      `<span class="gh-title">${title}</span>` +
+      `<span class="gh-sub">（${grp.length}棟${dtxt}）</span>` +
       `<button type="button" class="grp-go">🧭 このグループへ行く</button>`;
     // グループの全棟を訪問順に外部地図へ渡す（複数経由地で全部表示する）
     head.querySelector(".grp-go").addEventListener("click", (e) => {
       e.stopPropagation(); goToGroupIds(grp);
     });
+    // 地名を非同期で取得して見出しに反映（取れなければ「グループN」のまま）
+    if (!cached) {
+      fetchAreaName(c.lon, c.lat).then((nm) => {
+        if (nm) { const el = head.querySelector(".gh-title"); if (el) el.textContent = `${nm} 付近`; }
+      });
+    }
     wrap.appendChild(head);
     grp.forEach((id) => {
-      n++;
       const t = targetsById[id] || { id };
       const done = isDoneId(id);
       const h = t.height_m != null ? `${t.height_m.toFixed(0)}m` : "高さ不明";
@@ -798,7 +870,7 @@ function renderPlanGroups() {
       const item = document.createElement("div");
       item.className = "grp-item" + (done ? " done" : "");
       item.innerHTML =
-        `<div class="num" style="background:${color}">${n}</div>` +
+        `<div class="num" style="background:${color}">${planNum[id]}</div>` +
         `<div class="gi-main"><div class="gi-id">${id}</div>` +
         `<div class="gi-meta">${h}・${t.usage_label || "用途不明"}` +
         `${done ? ' <span class="gi-done">✓調査済</span>' : ""}</div></div>` +
