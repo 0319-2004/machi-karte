@@ -3,16 +3,25 @@
 MapLibre GL JS による地図と確認画面を置く場所。まずはビルド不要の素の HTML/JS で始める。
 背景地図は国土地理院タイル（出典表示を必ず出す）。
 
-- `index.html` … 画面の骨組み（件数カウンタ・優先度リスト・属性パネル・帰属表示リンク）。
+- `index.html` … **配布時の最初のページ（紹介）**。このプロダクトでやること・課題・骨格（抽出→推定→確認→出力）を
+  紹介し、「次のアクション」で建物データ画面（`/map.html`）へ送る。大見出しの件数は `/api/stats` から取る
+  （API 未起動なら設計書の値を表示）。自己完結（スタイルは inline、外部アセットなし）。
+- `map.html` … 建物データ画面（旧 `index.html`）。画面の骨組み（件数カウンタ・優先度リスト・属性パネル・帰属表示リンク）
+  に、配布デモの段階UI（検索オーバーレイ・抽出ボタン・演出キャンバス）を重ねている。
 - `app.js` … 地図（地理院 淡色＋`fill-extrusion`）、全棟⇄調査対象のみの切替アニメ、件数カウントダウン、
   リストから `flyTo`、クリックで属性パネル。API は `/api/*`、建物は `/data/buildings.geojson`。
-- `style.css` … レイアウト。MapLibre GL JS は CDN（unpkg）から読み込む（ビルド不要）。
+  `body.demo` のときは数字と建物色を即時に出さず、`window.MK`（map / 色の切替 / カウント）を `demo.js` へ渡す。
+- `demo.js` … 配布デモの進行役。段階0=街名を入力（「新宿」）→ 段階1=全棟を灰色で表示 →
+  段階2=「調査必要箇所を抽出」でエレクトリックな演出（自前 Canvas）→ 調査対象が橙に浮かび、作業UIが現れる。
+  件数は `/api/stats` から取り、直書きしない。
+- `style.css` … レイアウト＋配布デモの段階表示（`body.demo` + `stage-0/1/2`）。MapLibre GL JS は CDN（unpkg）から
+  読み込む（ビルド不要）。
 
 - `survey.html` / `survey.js` … 現地調査モード（スマホ前提）。地図で対象を選ぶ→近い順/優先度順の
   プラン→1棟ずつ入力。入力画面には**音声入力（試験的）**がある。
 
-`api`（FastAPI）が `/` で配信するので、`make serve` 後に http://localhost:8000/ を開く。
-現地調査モードは http://localhost:8000/survey.html 。
+`api`（FastAPI）が `/` で配信するので、`make serve` 後に http://localhost:8000/ を開く（紹介ページ）。
+建物データ画面は http://localhost:8000/map.html 、現地調査モードは http://localhost:8000/survey.html 。
 （`/survey/` は現地写真の保存先 `data/survey/` のマウントなので、UI は `survey.html` を開く）
 
 ## 音声入力（試験的）について

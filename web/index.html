@@ -3,90 +3,267 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>まちカルテ — 新宿区の不明群</title>
-  <link rel="stylesheet"
-        href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
-  <link rel="stylesheet" href="/style.css" />
+  <title>まちカルテ — 調査が及んでいない建物を、地図で確かめて更新候補にする</title>
+  <style>
+    /* =========================================================================
+       Vercel Geist 系：近黒 × ヘアライン罫線 × 等幅の数字 × 装飾を削ぐ。
+       角は立てる（最大 6px）。影やグローは使わない。アクセントは1色（橙）＋補助（シアン）。
+       ========================================================================= */
+    :root {
+      --bg: #0a0a0a;
+      --fg: #ededed;
+      --mut: #a1a1a1;
+      --dim: #6e6e6e;
+      --line: #1f1f1f;
+      --line-2: #2c2c2c;
+      --accent: #ff6a2b;   /* 調査対象／削減の色（地図の target と揃える） */
+      --cyan: #4fe0cf;     /* 補助アクセント（リンク・ラベルの一部） */
+      --mono: ui-monospace, "SF Mono", "Menlo", "Liberation Mono", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+              "Hiragino Sans", "Noto Sans JP", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
+      line-height: 1.65; -webkit-font-smoothing: antialiased; letter-spacing: 0.01em; }
+    a { color: var(--fg); text-decoration: none; }
+    ::selection { background: var(--accent); color: #0a0a0a; }
+
+    /* 中央の版面：左右にヘアライン（定規のような構造感） */
+    .frame { max-width: 1080px; margin: 0 auto; border-left: 1px solid var(--line);
+      border-right: 1px solid var(--line); }
+    .pad { padding: 0 clamp(20px, 4vw, 48px); }
+
+    /* ラベル（mono・大文字・字間広め） */
+    .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--dim); }
+
+    /* ナビ */
+    header.nav { display: flex; align-items: center; justify-content: space-between;
+      padding: 18px clamp(20px,4vw,48px); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px;
+      letter-spacing: 0.02em; }
+    .brand .mk { width: 16px; height: 16px; border: 1.5px solid var(--fg); position: relative; }
+    .brand .mk::after { content: ""; position: absolute; inset: 3px 3px auto auto; width: 5px; height: 5px;
+      background: var(--accent); }
+    .nav .right { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+    .nav .right a:hover { color: var(--fg); }
+
+    /* ヒーロー */
+    .hero { padding: clamp(44px,8vw,86px) 0 clamp(32px,5vw,56px); border-bottom: 1px solid var(--line); }
+    .hero h1 { font-size: clamp(30px, 6.2vw, 60px); line-height: 1.08; font-weight: 680;
+      letter-spacing: -0.025em; margin: 18px 0 20px; }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero .lead { max-width: 640px; color: var(--mut); font-size: clamp(14px,1.9vw,17px); margin: 0 0 36px; }
+
+    /* 件数：ヘアライングリッドの3タイル（等幅） */
+    .stats { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 1px; background: var(--line);
+      border: 1px solid var(--line); margin: 0 0 32px; }
+    .stats .tile { background: var(--bg); padding: 20px 22px; }
+    .stats .op { background: var(--bg); display: flex; align-items: center; justify-content: center;
+      padding: 0 14px; color: var(--dim); font-family: var(--mono); font-size: 22px; }
+    .stats .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--dim); display: block; margin-bottom: 8px; }
+    .stats .v { font-family: var(--mono); font-size: clamp(28px,5.5vw,44px); font-weight: 600;
+      letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+    .stats .tile.target .v, .stats .tile.pct .v { color: var(--accent); }
+    .stats .tile .sub { font-size: 11.5px; color: var(--dim); margin-top: 7px; }
+
+    /* ボタン（Geist：白地・黒文字・角は控えめ・影なし） */
+    .cta-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+    a.btn { display: inline-flex; align-items: center; gap: 10px; font-size: 14.5px; font-weight: 600;
+      padding: 12px 20px; border-radius: 6px; border: 1px solid var(--fg); transition: background .12s, color .12s; }
+    a.btn.primary { background: var(--fg); color: #0a0a0a; }
+    a.btn.primary:hover { background: #fff; border-color: #fff; }
+    a.btn .arr { font-family: var(--mono); }
+    .cta-note { font-size: 12.5px; color: var(--dim); font-family: var(--mono); }
+
+    /* セクション（左：ラベル／右：本文 の二段組。定規のような区切り） */
+    .row { display: grid; grid-template-columns: 220px 1fr; gap: 0;
+      border-bottom: 1px solid var(--line); }
+    .row > .label { padding: 32px clamp(20px,4vw,48px); border-right: 1px solid var(--line); }
+    .row > .label .n { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+    .row > .label h2 { font-size: 17px; font-weight: 640; margin: 10px 0 0; letter-spacing: -0.01em; }
+    .row > .body { padding: 32px clamp(20px,4vw,48px); }
+    .row > .body p { margin: 0; color: var(--mut); font-size: 14.5px; }
+    .row > .body p + p { margin-top: 12px; }
+    .row > .body b { color: var(--fg); font-weight: 600; }
+    .row > .body .accent { color: var(--accent); }
+
+    /* ヘアライングリッド（セル間が1pxの罫線になる） */
+    .grid { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .grid.c4 { grid-template-columns: repeat(4, 1fr); }
+    .grid.c3 { grid-template-columns: repeat(3, 1fr); }
+    .grid.c2 { grid-template-columns: repeat(2, 1fr); }
+    .cell { background: var(--bg); padding: 18px 18px; }
+    .cell .idx { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.08em; }
+    .cell h3 { margin: 10px 0 6px; font-size: 15px; font-weight: 620; }
+    .cell p { margin: 0; font-size: 13px; color: var(--mut); line-height: 1.6; }
+    .cell p b { color: var(--fg); }
+    .cell .tag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--dim); border: 1px solid var(--line-2); padding: 1px 6px; border-radius: 3px; float: right; }
+    .cell .fmt { font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; font-weight: 600;
+      display: inline-block; margin-bottom: 10px; }
+    .cell .fmt.csv { color: var(--cyan); }
+    .cell .fmt.geo { color: var(--accent); }
+    .cell .fact { font-size: 13px; color: var(--fg); margin: 0 0 10px; }
+    .cell .then { font-size: 12px; color: var(--mut); border-top: 1px solid var(--line); padding-top: 10px; }
+    .cell .then b { color: var(--accent); }
+
+    .note { margin: 18px 0 0; font-size: 12.5px; color: var(--mut); line-height: 1.75; }
+    .note b { color: var(--fg); } .note .accent { color: var(--accent); }
+
+    /* フッター（帰属表示） */
+    footer { padding: 30px clamp(20px,4vw,48px) 44px; }
+    footer .attr { font-size: 11.5px; color: var(--dim); line-height: 1.9; font-family: var(--mono); }
+    footer .attr b { color: var(--mut); font-weight: 600; }
+    footer .attr a { color: var(--cyan); }
+    footer .end { margin-top: 16px; font-size: 11.5px; color: var(--dim); }
+
+    @media (max-width: 820px) {
+      .row { grid-template-columns: 1fr; }
+      .row > .label { border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 18px; }
+      .grid.c4 { grid-template-columns: 1fr 1fr; }
+      .grid.c3 { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .stats { grid-template-columns: 1fr; }
+      .stats .op { display: none; }
+      .grid.c4, .grid.c2 { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-  <div id="map"></div>
+  <div class="frame">
 
-  <!-- 上部：絞り込みの件数カウンタ と 処理時間の計測 -->
-  <header id="counter">
-    <div class="counts">
-      <span class="count" id="count-total">—</span>
-      <span class="arrow">→</span>
-      <span class="count target" id="count-target">—</span>
-      <span class="reduction" id="count-reduction"></span>
-      <button id="toggle">調査対象のみ</button>
-    </div>
-    <!-- 計測（常時表示）：処理済み N棟 / 合計 M分 / 1棟あたり中央値 S秒 -->
-    <div id="metrics" class="metrics">
-      <div class="m"><span class="mv" id="m-processed">0</span><span class="ml">処理済み（棟）</span></div>
-      <div class="m"><span class="mv" id="m-total">0.0</span><span class="ml">合計（分）</span></div>
-      <div class="m"><span class="mv" id="m-median">–</span><span class="ml">中央値（秒/棟）</span></div>
-      <div class="m split"><span class="mv" id="m-keep">–</span><span class="ml">そのまま確定</span></div>
-      <div class="m split"><span class="mv" id="m-edit">–</span><span class="ml">修正して確定</span></div>
-    </div>
-    <!-- 現地確認が必要な棟（判断不能の集約）を開くバー -->
-    <div id="onsite-bar" role="button" title="判断不能（現地確認が必要）な棟を見る">
-      <span id="onsite-summary">現地確認が必要な棟を集計中…</span>
-      <span id="onsite-caret">▸</span>
-    </div>
-  </header>
+    <header class="nav">
+      <div class="brand"><span class="mk"></span>まちカルテ</div>
+      <div class="right"><a href="/attribution">帰属表示・出典 ↗</a></div>
+    </header>
 
-  <!-- 現地確認が必要な棟：区分ごとの集約と「現地で何を見るか」の要約 -->
-  <section id="onsite-panel" class="hidden">
-    <div class="op-head">
-      <h2>現地確認が必要な棟<small id="op-sub"></small></h2>
-      <button id="onsite-close" title="閉じる">×</button>
-    </div>
-    <div id="onsite-groups"></div>
-    <button id="onsite-clear" class="hidden">地図の絞り込みを解除</button>
-  </section>
+    <!-- ヒーロー -->
+    <section class="hero pad">
+      <div class="eyebrow">Built with Claude — Japan 2026</div>
+      <h1>調査が及んでいない建物を、<br><em>地図で確かめて</em>更新候補にする。</h1>
+      <p class="lead">
+        PLATEAU 新宿区の建物属性には、用途も階数も建築年も分からない「不明群」が大量に残っています。
+        まちカルテは不明群を自動で絞り込み、Claude が属性を推定し、人が地図で確認・確定して、
+        自治体がそのまま使える更新候補リスト（CSV / GeoJSON）を出力します。
+      </p>
 
-  <!-- 左：優先度順リスト -->
-  <aside id="sidebar">
-    <h2>優先度順リスト<small id="sidebar-sub">（高さ→新規→面積→LOD2）</small></h2>
-    <ol id="target-list"></ol>
-  </aside>
-
-  <!-- 右：確認・確定カード（基本は1画面。はみ出す分だけ内側でスクロール） -->
-  <section id="confirm" class="hidden">
-    <button id="confirm-close" title="閉じる">×</button>
-    <div id="confirm-scroll"></div>
-    <div id="confirm-foot"></div>
-  </section>
-
-  <!-- 更新候補のダウンロード（確定済みのみ。未確定・判断不能は含まない） -->
-  <div id="download">
-    <span id="dl-count">更新候補 0 件</span>
-    <a id="dl-csv" href="/api/export.csv" download>CSV</a>
-    <a id="dl-geojson" href="/api/export.geojson" download>GeoJSON</a>
-    <button id="dl-report" title="確定済みから調査レポート（Markdown）を生成してダウンロード">レポート生成</button>
-  </div>
-
-  <a id="attr-link" href="/attribution">帰属表示</a>
-  <a id="survey-link" href="/survey.html"
-     style="position:fixed;left:10px;bottom:10px;z-index:5;background:#e64a19;color:#fff;
-            padding:9px 14px;border-radius:20px;font:600 13px system-ui,sans-serif;
-            text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,.3)">📱 現地調査</a>
-
-  <!-- 確度が低い属性を「そのまま確定」しようとしたときの確認ダイアログ -->
-  <div id="lowconf-modal" class="hidden">
-    <div class="lc-box">
-      <h3>確度の低い属性があります</h3>
-      <p id="lc-attrs"></p>
-      <p class="lc-msg">この属性は確度が低いため、現地確認を推奨します。それでも確定しますか？</p>
-      <div class="lc-actions">
-        <button id="lc-survey" class="primary">現地確認リストに追加（確定しない）</button>
-        <button id="lc-proceed">それでも確定する</button>
-        <button id="lc-cancel">やめる</button>
+      <div class="stats">
+        <div class="tile"><span class="k">新宿区の全建物</span>
+          <div class="v" id="s-total">57,780</div><div class="sub">version 2025</div></div>
+        <div class="op">→</div>
+        <div class="tile target"><span class="k">調査が必要な不明群</span>
+          <div class="v" id="s-target">4,982</div><div class="sub">自動で抽出</div></div>
+        <div class="op">=</div>
+        <div class="tile pct"><span class="k">絞り込み</span>
+          <div class="v" id="s-pct">−91.4%</div><div class="sub">人が見る量を圧縮</div></div>
       </div>
-    </div>
+
+      <div class="cta-row">
+        <a class="btn primary" href="/map.html">次のアクション <span class="arr">→</span></a>
+        <span class="cta-note">建物データ画面へ。「新宿」と入力して調査必要箇所を抽出します。</span>
+      </div>
+    </section>
+
+    <!-- 課題 -->
+    <section class="row">
+      <div class="label pad"><div class="n">01</div><h2>この課題</h2></div>
+      <div class="body">
+        <p>
+          3D都市モデル PLATEAU は整備されても、建物一棟ごとの属性は欠けたまま残ります。
+          新宿区では用途が「不明」として入っている棟が <span class="accent">約5千棟</span>。
+        </p>
+        <p>
+          これらは住所も不動産IDも紐づかず、機械的な名寄せができません。かといって一棟ずつ現地を回るのは、
+          自治体の人手では到底まわらない。<b>「どこを調べるべきか」を自動で絞り込み、「人が確認するだけ」の状態まで持っていく</b>——
+          そこがこのプロダクトの受け持ちです。
+        </p>
+      </div>
+    </section>
+
+    <!-- できること（骨格） -->
+    <section class="row">
+      <div class="label pad"><div class="n">02</div><h2>できること</h2></div>
+      <div class="body">
+        <p style="margin-bottom:18px">抽出（自動）→ 推定（Claude）→ 確認・確定（人）→ 出力（自動）。どの時点で止まっても、この一本が通ります。</p>
+        <div class="grid c4">
+          <div class="cell"><span class="tag">Auto</span><div class="idx">STEP 1</div>
+            <h3>抽出</h3><p>センチネル値を正規化し、用途・階数・調査年が欠けた「不明群」だけを絞り込む。</p></div>
+          <div class="cell"><span class="tag">Claude</span><div class="idx">STEP 2</div>
+            <h3>推定</h3><p>POI・高さ・近傍から推定。根拠と信頼度を添え、分からなければ「判断不能」と自己申告。</p></div>
+          <div class="cell"><span class="tag">Human</span><div class="idx">STEP 3</div>
+            <h3>確認・確定</h3><p>地図で一棟ずつ確認。そのまま確定、または修正して確定。処理時間も計測。</p></div>
+          <div class="cell"><span class="tag">Auto</span><div class="idx">STEP 4</div>
+            <h3>出力</h3><p>確定した分だけを建物ID付きで書き出し、<b>PLATEAU CMS に取り込める形</b>で渡す。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CSV / GeoJSON の価値 -->
+    <section class="row">
+      <div class="label pad"><div class="n">03</div><h2>出力の行き先</h2></div>
+      <div class="body">
+        <p style="margin-bottom:18px">CSV / GeoJSON で出すと、何がうれしいか。</p>
+        <div class="grid c2">
+          <div class="cell"><span class="fmt csv">CSV</span>
+            <p>自治体の台帳・Excel に<b>そのまま取り込める</b>。建物ID・現在値・推定値・信頼度・確定者が1行ずつ並ぶので、担当者は差し替え作業にすぐ使える。</p></div>
+          <div class="cell"><span class="fmt geo">GeoJSON</span>
+            <p>QGIS などの GIS や Web 地図に<b>そのまま載せられる</b>。位置を持ったまま渡せるので、どの建物の更新候補かを地図で確かめながら反映できる。</p></div>
+        </div>
+        <p class="note">
+          どちらも主キーは <b>uro:buildingID</b>。だから <b>PLATEAU CMS（re:Earth CMS）</b> 側の建物に突き合わせて、
+          更新候補をそのまま取り込めます。公式データは上書きせず、<span class="accent">人が確定した分だけ</span>を「提案（更新候補）」として渡します
+          （判断不能・未確定は含めない）。実際に反映するかどうかの判断は、自治体が持ちます。
+        </p>
+      </div>
+    </section>
+
+    <!-- 難しさ（3制約） -->
+    <section class="row">
+      <div class="label pad"><div class="n">04</div><h2>なぜ「人が確定する」のか</h2></div>
+      <div class="body">
+        <p style="margin-bottom:18px">実データで確かめた3つの事実が、この設計を決めています。</p>
+        <div class="grid c3">
+          <div class="cell"><h3>名寄せが不可能</h3>
+            <p class="fact">不明群に住所がなく、不動産IDは0件。地番ポリゴンの9割が任意座標系。</p>
+            <p class="then">だから <b>自動で紐づけず</b>、候補を出して人が地図で確定する。</p></div>
+          <div class="cell"><h3>用途推定は6割が頭打ち</h3>
+            <p class="fact">近傍かつ高さ±3mで一致は 56.8%。最頻値でも 43.1%。</p>
+            <p class="then">だから推定は <b>候補＋信頼度</b> として出し、確定は人に委ねる。</p></div>
+          <div class="cell"><h3>階数は高さから当たる</h3>
+            <p class="fact">高さ÷3.8m で 62.3%、±1階許容なら 92.1%。</p>
+            <p class="then">だから階数は <b>自動で埋め</b>、人は確認するだけでよい。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- フッター：帰属表示 -->
+    <footer>
+      <div class="attr">
+        <b>出典・帰属</b><br>
+        建物：<b>国土交通省 Project PLATEAU</b>（新宿区 13104）／ 背景地図：<b>国土地理院</b>（地理院タイル）／
+        POI：<b>© OpenStreetMap contributors</b>（ODbL）・<b>Overture Maps</b>（CDLA Permissive 2.0）／
+        徒歩経路：<b>OSRM</b>（BSD・OpenStreetMap 由来）／ <b>東京都デジタルツイン</b>（CC BY 4.0）。
+        詳細は <a href="/attribution">帰属表示ページ ↗</a>
+      </div>
+      <div class="end">公式データは上書きしません。推定は候補、確定は人。まちカルテ — Built with Claude: Japan 2026。</div>
+    </footer>
+
   </div>
 
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <script src="/app.js"></script>
+  <script>
+    // 大見出しの数字はデータから取る（取れなければ設計書の値のまま）
+    (async () => {
+      try {
+        const s = await (await fetch("/api/stats")).json();
+        const fmt = (n) => n.toLocaleString();
+        document.getElementById("s-total").textContent = fmt(s.total);
+        document.getElementById("s-target").textContent = fmt(s.target);
+        document.getElementById("s-pct").textContent = "−" + s.reduction_pct + "%";
+      } catch (e) { /* API未起動でも設計書の値を表示したまま */ }
+    })();
+  </script>
 </body>
 </html>

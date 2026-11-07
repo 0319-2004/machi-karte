@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>まちカルテ — 新宿区の不明群</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="demo stage-0">
+  <div id="map"></div>
+
+  <!-- エレクトリックな抽出演出のキャンバス（最前面・既定は非表示） -->
+  <canvas id="demo-bolt"></canvas>
+
+  <!-- 段階0：街の名前を入力（デモは「新宿」に対応） -->
+  <div id="demo-search">
+    <a id="demo-back" href="/">← まちカルテ トップ</a>
+    <div class="ds-box">
+      <h1>建物データを呼び出す</h1>
+      <p class="ds-lead">調べたい街の名前を入力してください。<br>（このデモは <b>新宿</b> に対応しています）</p>
+      <form id="demo-form" autocomplete="off">
+        <input id="demo-input" type="text" placeholder="例：新宿" aria-label="街の名前" />
+        <button id="demo-go" type="submit">街データを表示</button>
+      </form>
+      <p id="demo-hint" class="ds-hint"></p>
+    </div>
+  </div>
+
+  <!-- 段階1：全棟を灰色で表示。押すと調査必要箇所を抽出（演出つき） -->
+  <div id="demo-extract">
+    <div class="de-caption">この街の全建物から、調査が必要な棟だけを絞り込みます</div>
+    <button id="demo-extract-btn" type="button">
+      <span class="de-spark">⚡</span>調査必要箇所を抽出
+    </button>
+  </div>
+
+  <!-- 上部：絞り込みの件数カウンタ と 処理時間の計測 -->
+  <header id="counter">
+    <div class="counts">
+      <span class="count" id="count-total">—</span>
+      <span class="arrow">→</span>
+      <span class="count target" id="count-target">—</span>
+      <span class="reduction" id="count-reduction"></span>
+      <button id="toggle">調査対象のみ</button>
+    </div>
+    <!-- 計測（常時表示）：処理済み N棟 / 合計 M分 / 1棟あたり中央値 S秒 -->
+    <div id="metrics" class="metrics">
+      <div class="m"><span class="mv" id="m-processed">0</span><span class="ml">処理済み（棟）</span></div>
+      <div class="m"><span class="mv" id="m-total">0.0</span><span class="ml">合計（分）</span></div>
+      <div class="m"><span class="mv" id="m-median">–</span><span class="ml">中央値（秒/棟）</span></div>
+      <div class="m split"><span class="mv" id="m-keep">–</span><span class="ml">そのまま確定</span></div>
+      <div class="m split"><span class="mv" id="m-edit">–</span><span class="ml">修正して確定</span></div>
+    </div>
+    <!-- 現地確認が必要な棟（判断不能の集約）を開くバー -->
+    <div id="onsite-bar" role="button" title="判断不能（現地確認が必要）な棟を見る">
+      <span id="onsite-summary">現地確認が必要な棟を集計中…</span>
+      <span id="onsite-caret">▸</span>
+    </div>
+  </header>
+
+  <!-- 現地確認が必要な棟：区分ごとの集約と「現地で何を見るか」の要約 -->
+  <section id="onsite-panel" class="hidden">
+    <div class="op-head">
+      <h2>現地確認が必要な棟<small id="op-sub"></small></h2>
+      <button id="onsite-close" title="閉じる">×</button>
+    </div>
+    <div id="onsite-groups"></div>
+    <button id="onsite-clear" class="hidden">地図の絞り込みを解除</button>
+  </section>
+
+  <!-- 左：優先度順リスト -->
+  <aside id="sidebar">
+    <h2>優先度順リスト<small id="sidebar-sub">（高さ→新規→面積→LOD2）</small></h2>
+    <ol id="target-list"></ol>
+  </aside>
+
+  <!-- 右：確認・確定カード（基本は1画面。はみ出す分だけ内側でスクロール） -->
+  <section id="confirm" class="hidden">
+    <button id="confirm-close" title="閉じる">×</button>
+    <div id="confirm-scroll"></div>
+    <div id="confirm-foot"></div>
+  </section>
+
+  <!-- 更新候補のダウンロード（確定済みのみ。未確定・判断不能は含まない） -->
+  <div id="download">
+    <span id="dl-count">更新候補 0 件</span>
+    <a id="dl-csv" href="/api/export.csv" download>CSV</a>
+    <a id="dl-geojson" href="/api/export.geojson" download>GeoJSON</a>
+    <button id="dl-report" title="確定済みから調査レポート（Markdown）を生成してダウンロード">レポート生成</button>
+  </div>
+
+  <a id="attr-link" href="/attribution">帰属表示</a>
+  <a id="survey-link" href="/survey.html"
+     style="position:fixed;left:10px;bottom:10px;z-index:5;background:#e64a19;color:#fff;
+            padding:9px 14px;border-radius:20px;font:600 13px system-ui,sans-serif;
+            text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,.3)">📱 現地調査</a>
+
+  <!-- 確度が低い属性を「そのまま確定」しようとしたときの確認ダイアログ -->
+  <div id="lowconf-modal" class="hidden">
+    <div class="lc-box">
+      <h3>確度の低い属性があります</h3>
+      <p id="lc-attrs"></p>
+      <p class="lc-msg">この属性は確度が低いため、現地確認を推奨します。それでも確定しますか？</p>
+      <div class="lc-actions">
+        <button id="lc-survey" class="primary">現地確認リストに追加（確定しない）</button>
+        <button id="lc-proceed">それでも確定する</button>
+        <button id="lc-cancel">やめる</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="/app.js"></script>
+  <script src="/demo.js"></script>
+</body>
+</html>

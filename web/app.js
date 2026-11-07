@@ -12,7 +12,19 @@ const style = {
         '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院（地理院タイル）</a>',
     },
   },
-  layers: [{ id: "gsi", type: "raster", source: "gsi" }],
+  // kepler.gl 調の暗い背景。地理院タイル（淡色）を暗く沈めて使う（出典表示は維持）。
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#0e1116" } },
+    {
+      id: "gsi", type: "raster", source: "gsi",
+      paint: {
+        "raster-opacity": 0.8,
+        "raster-brightness-max": 0.45,
+        "raster-saturation": -0.3,
+        "raster-contrast": 0.1,
+      },
+    },
+  ],
 };
 
 // 初期表示：西新宿・都庁周辺を斜め俯瞰（デモの開始位置）
@@ -27,10 +39,16 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
 
-const COLOR_NON = "#b0bec5";
-const COLOR_TGT = "#e64a19";
-const COLOR_SEL = "#ffd600";
+// kepler.gl 調：暗い地図の上でも建物の塊が見える青灰色。調査対象は橙で浮かせる。
+const COLOR_NON = "#6b7687";
+const COLOR_TGT = "#ff6a2b";
+const COLOR_SEL = "#ffd54a";
 const HEIGHT_EXPR = ["coalesce", ["get", "h"], 3];
+
+// デモ演出モード（map.html は body.demo で開始）。demo.js が段階を進める。
+// このモードでは件数と建物の色を即時に出さず、「新宿」入力→抽出の流れで公開する。
+const DEMO = document.body.classList.contains("demo");
+window.MK = {};   // demo.js へ渡すフック（map / 色の切り替え / カウント）
 
 let stats = null;
 let targetsOnly = false;
@@ -71,6 +89,7 @@ function animateCount(el, from, to, dur = 1500) {
 
 async function loadStats() {
   stats = await (await fetch("/api/stats")).json();
+  if (DEMO) return;   // デモでは demo.js が段階に合わせて数字を公開する
   elTotal.textContent = stats.total.toLocaleString();
   elTarget.textContent = stats.target.toLocaleString();
   elReduction.textContent = "−" + stats.reduction_pct + "%";
@@ -201,7 +220,8 @@ function addBuildingLayers() {
     filter: ["==", ["get", "t"], 0],
     paint: {
       "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
-      "fill-extrusion-color": COLOR_NON, "fill-extrusion-opacity": 0.85,
+      "fill-extrusion-color": COLOR_NON,
+      "fill-extrusion-opacity": DEMO ? 0 : 0.85,
       "fill-extrusion-opacity-transition": { duration: 1500 },
     },
   });
@@ -210,7 +230,11 @@ function addBuildingLayers() {
     filter: ["==", ["get", "t"], 1],
     paint: {
       "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
-      "fill-extrusion-color": COLOR_TGT, "fill-extrusion-opacity": 0.9,
+      // デモでは最初は全棟と同じ灰色・非表示。抽出の瞬間に橙へ変える。
+      "fill-extrusion-color": DEMO ? COLOR_NON : COLOR_TGT,
+      "fill-extrusion-color-transition": { duration: 900 },
+      "fill-extrusion-opacity": DEMO ? 0 : 0.9,
+      "fill-extrusion-opacity-transition": { duration: 900 },
     },
   });
   // 現地確認が必要な棟（判断不能の区分）のハイライト。既定は非表示（空フィルタ）。
@@ -260,6 +284,36 @@ function addBuildingLayers() {
 
   loadConfirmed();
   loadPhotos();
+
+  // 新宿区の輪郭（表示専用・PLATEAU建物の凹包）。「新宿」入力時に光がなぞる。
+  // line-gradient を1フレームずつ書き換えて走らせるため lineMetrics を有効にする。
+  const clearGrad = ["interpolate", ["linear"], ["line-progress"],
+    0, "rgba(42,212,232,0)", 1, "rgba(42,212,232,0)"];
+  map.addSource("ward", { type: "geojson", data: "/shinjuku_outline.geojson", lineMetrics: true });
+  map.addLayer({
+    id: "ward-glow", type: "line", source: "ward",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-width": 10, "line-blur": 9, "line-opacity": 0,
+      "line-opacity-transition": { duration: 700 }, "line-gradient": clearGrad },
+  });
+  map.addLayer({
+    id: "ward-line", type: "line", source: "ward",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-width": 2.5, "line-opacity": 0,
+      "line-opacity-transition": { duration: 700 }, "line-gradient": clearGrad },
+  });
+
+  // デモ演出のフック：灰色で全棟を見せる → 抽出で調査対象を橙に浮かび上がらせる
+  window.MK.showAllGray = () => {
+    map.setPaintProperty("b-non", "fill-extrusion-opacity", 0.85);
+    map.setPaintProperty("b-tgt", "fill-extrusion-color", COLOR_NON);
+    map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0.85);
+  };
+  window.MK.revealTargets = () => {
+    map.setPaintProperty("b-tgt", "fill-extrusion-color", COLOR_TGT);
+    map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0.9);
+  };
+  document.dispatchEvent(new Event("mk:layers-ready"));
 }
 
 // 現地写真がある棟を地図にマーカー表示（/api/photos の重心点）
@@ -584,6 +638,10 @@ document.addEventListener("keydown", (e) => {
 });
 
 // --- 起動 -------------------------------------------------------------------
+// デモ演出（demo.js）へ map と数字アニメーションを渡す
+window.MK.map = map;
+window.MK.animateCount = animateCount;
+
 loadStats();
 loadUsageCodes();
 loadMetrics();
