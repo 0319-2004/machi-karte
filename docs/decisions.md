@@ -16,6 +16,13 @@
 
 ---
 
+## 2026-11-07 デモ：抽出前にハイライト（計画の紫・確定の緑・写真の点）が見えていたのを修正
+
+- 背景 / きっかけ：配布デモ（map.html, body.demo）で「街名入力→全棟灰色→抽出で橙が浮かぶ」演出の**抽出前（段階0/1）から、計画の紫（`b-plan`）・現地確定の緑（`b-done-onsite`）・写真のシアン点（`b-photo`）が見えていた**。これらはロード時にフィルタが入る（`planSel`／`loadConfirmed`／`loadPhotos`）ため、全棟灰色の演出が崩れていた。
+- 判断：デモのときは**抽出まで隠す**。`DEMO_OVERLAY_LAYERS = [b-plan, b-onsite, b-done-onsite, b-sel, b-photo]` を定義し、`addBuildingLayers` の最後で `DEMO` なら `visibility:none` に。抽出（`window.MK.revealTargets`）で `visibility:visible` に戻す（既存の b-tgt を橙に出すのと同じタイミング）。`b-non`/`b-tgt` は従来どおり opacity で制御（変更なし）。非デモ時は常に表示（従来どおり）。
+- 根拠（実ブラウザ＝ヘッドレス Chrome / CDP）：段階0・段階1では5レイヤとも `visibility=none`・`queryRenderedFeatures=0`（緑/紫/点は出ない）。通し操作（新宿入力→段階1→抽出→段階2）で、抽出後に `b-plan`・`b-done-onsite` が `visible` になり、計画の紫10棟が描画。コンソールエラー0。
+- 影響範囲：`web/app.js`（`DEMO_OVERLAY_LAYERS`・`addBuildingLayers` の隠し・`revealTargets` の表示）のみ。API・DB・現地調査（survey）は不変。
+
 ## 2026-11-07 PC：計画選択を地図で紫ハイライト／スマホ：グループの外部ルートに全棟を渡す
 
 - 背景 / きっかけ：(1) PC で囲んで計画に入れても、地図上でどれを選んだか色で分からなかった。(2) スマホの「このグループへ行く」が外部地図アプリにグループ内の **1棟（先頭）しか渡していなかった**（`goTo(grp[0])`）。グループの全棟を回れるようにしたい。

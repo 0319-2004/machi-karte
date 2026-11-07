@@ -48,6 +48,8 @@ const HEIGHT_EXPR = ["coalesce", ["get", "h"], 3];
 // デモ演出モード（map.html は body.demo で開始）。demo.js が段階を進める。
 // このモードでは件数と建物の色を即時に出さず、「新宿」入力→抽出の流れで公開する。
 const DEMO = document.body.classList.contains("demo");
+// デモで抽出まで隠すハイライト系レイヤ（計画=紫・確定=緑・現地確認=濃い紫・選択=黄・写真=シアン）
+const DEMO_OVERLAY_LAYERS = ["b-plan", "b-onsite", "b-done-onsite", "b-sel", "b-photo"];
 window.MK = {};   // demo.js へ渡すフック（map / 色の切り替え / カウント）
 
 let stats = null;
@@ -327,7 +329,16 @@ function addBuildingLayers() {
   window.MK.revealTargets = () => {
     map.setPaintProperty("b-tgt", "fill-extrusion-color", COLOR_TGT);
     map.setPaintProperty("b-tgt", "fill-extrusion-opacity", 0.9);
+    // 抽出まで隠していたハイライト（計画=紫・確定=緑・写真=シアン等）をここで出す
+    for (const id of DEMO_OVERLAY_LAYERS) map.setLayoutProperty(id, "visibility", "visible");
   };
+
+  // デモでは抽出前（段階0/1）に計画の紫・確定の緑・写真の点などが見えないよう隠す。
+  // これらはロード時にフィルタが入る（loadConfirmed/loadPhotos/planSel）ため、
+  // 全棟を灰色で見せる演出が崩れる。revealTargets（抽出）で visible に戻す。
+  if (DEMO) {
+    for (const id of DEMO_OVERLAY_LAYERS) map.setLayoutProperty(id, "visibility", "none");
+  }
   document.dispatchEvent(new Event("mk:layers-ready"));
 }
 
