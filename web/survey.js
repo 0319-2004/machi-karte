@@ -49,6 +49,31 @@ function goTo(id) {
   window.open(navDirectionsUrl(t.lat, t.lon), "_blank", "noopener");
 }
 
+// グループの全棟を外部地図に渡す（訪問順に複数経由地で表示）。
+// 複数経由地は Google マップが確実（Apple マップの URL スキームは複数目的地に非対応）なので、
+// グループ単位は端末を問わず Google マップを使う。出発地は省略し外部アプリの現在地に任せる。
+const NAV_MAX_STOPS = 10;   // Google マップのルートURLで確実に開ける経由地＋目的地の上限
+function navGroupUrl(points) {
+  let pts = points.filter((p) => p && p.lat != null && p.lon != null);
+  if (!pts.length) return null;
+  if (pts.length === 1) return navDirectionsUrl(pts[0].lat, pts[0].lon);  // 1棟は従来どおり端末別
+  // 経由地が多すぎると URL ごと弾かれるので、訪問順の先頭から上限まで渡す
+  // （同じ 200m グループ内なので、現地に着けば残りはアプリ内のプランで辿れる）
+  pts = pts.slice(0, NAV_MAX_STOPS);
+  const dest = pts[pts.length - 1];
+  const waypoints = pts.slice(0, -1).map((p) => `${p.lat},${p.lon}`).join("|");
+  return "https://www.google.com/maps/dir/?api=1" +
+    `&destination=${dest.lat},${dest.lon}` +
+    `&waypoints=${encodeURIComponent(waypoints)}&travelmode=walking`;
+}
+function goToGroupIds(ids) {
+  const pts = (ids || []).map((id) => targetsById[id])
+    .filter((t) => t && t.lon != null && t.lat != null)
+    .map((t) => ({ lat: t.lat, lon: t.lon }));
+  const url = navGroupUrl(pts);
+  if (url) window.open(url, "_blank", "noopener");
+}
+
 // --- アプリ内の徒歩経路（OSRM。線はこちらで描く。ターンバイターンの案内はしない） ----
 // 現在地→目的の建物の徒歩経路を、入力画面のミニ地図と俯瞰地図に描く。
 // 距離と線形は OSRM の経路、所要時間は「徒歩＝80m/分」で算出する
@@ -756,9 +781,9 @@ function renderPlanGroups() {
     head.innerHTML = `<span class="gdot" style="background:${color}"></span>` +
       `グループ${gi + 1}（${grp.length}棟）` +
       `<button type="button" class="grp-go">🧭 このグループへ行く</button>`;
-    // グループの先頭（訪問順の最初）の棟へ徒歩ルートを出す
+    // グループの全棟を訪問順に外部地図へ渡す（複数経由地で全部表示する）
     head.querySelector(".grp-go").addEventListener("click", (e) => {
-      e.stopPropagation(); goTo(grp[0]);
+      e.stopPropagation(); goToGroupIds(grp);
     });
     wrap.appendChild(head);
     grp.forEach((id) => {

@@ -66,7 +66,8 @@ function getDeskOperator() {
 }
 let onsiteData = null;      // 判断不能の集約（/api/unresolved）
 let onsiteActiveKey = null; // 地図で絞り込み中の区分キー
-const COLOR_ONSITE = "#8e24aa";   // 現地確認が必要な棟のハイライト（紫）
+const COLOR_PLAN = "#b06bff";     // 調査計画に入れた棟のハイライト（紫＝選択中）
+const COLOR_ONSITE = "#8e24aa";   // 現地確認が必要な棟のハイライト（濃い紫）
 const COLOR_DONE_ONSITE = "#2e7d32"; // 現地調査で確定した棟（緑）
 const COLOR_PHOTO = "#00bcd4";    // 現地写真がある棟のマーカー（シアン）
 const ATTR_LABEL = { usage: "用途", storeys: "階数（地上）", year_built: "建築年" };
@@ -242,6 +243,15 @@ function addBuildingLayers() {
       "fill-extrusion-opacity-transition": { duration: 900 },
     },
   });
+  // 調査計画に入れた棟を紫でハイライト（選択中だと一目でわかるように）。
+  map.addLayer({
+    id: "b-plan", type: "fill-extrusion", source: "buildings",
+    filter: ["in", ["get", "id"], ["literal", planSel]],
+    paint: {
+      "fill-extrusion-height": HEIGHT_EXPR, "fill-extrusion-base": 0,
+      "fill-extrusion-color": COLOR_PLAN, "fill-extrusion-opacity": 0.95,
+    },
+  });
   // 現地確認が必要な棟（判断不能の区分）のハイライト。既定は非表示（空フィルタ）。
   map.addLayer({
     id: "b-onsite", type: "fill-extrusion", source: "buildings",
@@ -268,7 +278,7 @@ function addBuildingLayers() {
       "fill-extrusion-color": COLOR_SEL, "fill-extrusion-opacity": 1,
     },
   });
-  for (const id of ["b-non", "b-tgt", "b-onsite", "b-done-onsite", "b-sel"]) {
+  for (const id of ["b-non", "b-tgt", "b-plan", "b-onsite", "b-done-onsite", "b-sel"]) {
     map.on("click", id, (e) => selectBuilding(e.features[0].properties.id));
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
@@ -670,11 +680,18 @@ function addManyToPlan(ids) {
   setTimeout(() => tray.classList.remove("flash"), 600);
 }
 
+// 地図の b-plan レイヤ（紫ハイライト）を現在の計画選択に合わせる
+function updatePlanLayer() {
+  if (!map.getLayer || !map.getLayer("b-plan")) return;   // 地図読み込み前はスキップ
+  map.setFilter("b-plan", ["in", ["get", "id"], ["literal", planSel]]);
+}
+
 const planTray = document.getElementById("plan-tray");
 function renderPlanTray() {
   document.getElementById("pt-count").textContent = planSel.length;
   planTray.classList.toggle("empty", planSel.length === 0);
   document.getElementById("pt-save").disabled = planSel.length === 0;
+  updatePlanLayer();   // 紫ハイライトを地図に反映
   const ul = document.getElementById("pt-list");
   ul.innerHTML = "";
   for (const id of planSel) {
