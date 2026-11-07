@@ -14,6 +14,14 @@
   <!-- エレクトリックな抽出演出のキャンバス（最前面・既定は非表示） -->
   <canvas id="demo-bolt"></canvas>
 
+  <!-- 地図を囲んで調査計画にまとめて追加（3Dの建物をドラッグで囲む） -->
+  <div id="map-tools">
+    <button id="region-toggle" type="button"
+      title="地図をドラッグで囲み、中の調査対象を調査計画にまとめて追加">⬚ 囲んで計画に追加</button>
+    <span id="region-hint" class="hidden">ドラッグで囲んだ調査対象を計画に追加します</span>
+  </div>
+  <div id="map-box"></div>
+
   <!-- 段階0：街の名前を入力（デモは「新宿」に対応） -->
   <div id="demo-search">
     <a id="demo-back" href="/">← まちカルテ トップ</a>
@@ -93,10 +101,6 @@
   </div>
 
   <a id="attr-link" href="/attribution">帰属表示</a>
-  <a id="survey-link" href="/survey.html"
-     style="position:fixed;left:10px;bottom:10px;z-index:5;background:#e64a19;color:#fff;
-            padding:9px 14px;border-radius:20px;font:600 13px system-ui,sans-serif;
-            text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,.3)">📱 現地調査</a>
 
   <!-- 調査計画トレイ（PC で選んだ棟をまとめ、QR で現地スマホへ渡す） -->
   <div id="plan-tray" class="empty">

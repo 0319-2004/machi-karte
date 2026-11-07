@@ -773,6 +773,65 @@ async function loadPlans() {
   } catch (e) { box.innerHTML = "<p class='pl-empty'>進捗を取得できませんでした。</p>"; }
 }
 
+// --- 地図を囲んで調査計画にまとめて追加（3Dの建物をドラッグで囲む） --------
+// queryRenderedFeatures で矩形内に描画されている調査対象（b-tgt）を拾い、計画に入れる。
+// 3D（pitch あり）でも「見た目で囲んだ範囲」をそのまま拾えるのでピッチ補正は不要。
+(function setupMapRegionSelect() {
+  const mapEl = document.getElementById("map");
+  const box = document.getElementById("map-box");
+  const btn = document.getElementById("region-toggle");
+  const hint = document.getElementById("region-hint");
+  let on = false, start = null;
+  const pt = (ev) => {
+    const r = mapEl.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  };
+  function setMode(v) {
+    on = v;
+    btn.classList.toggle("on", on);
+    btn.textContent = on ? "✓ 囲みモード中（解除）" : "⬚ 囲んで計画に追加";
+    hint.classList.toggle("hidden", !on);
+    hint.textContent = "ドラッグで囲んだ調査対象を計画に追加します";
+    mapEl.classList.toggle("region-on", on);
+    // ドラッグを矩形選択に使うため、地図のパン/ボックスズームを止める
+    if (on) { map.dragPan.disable(); map.boxZoom.disable(); }
+    else { map.dragPan.enable(); map.boxZoom.enable(); }
+    start = null; box.style.display = "none";
+  }
+  btn.addEventListener("click", () => setMode(!on));
+
+  mapEl.addEventListener("pointerdown", (ev) => {
+    if (!on) return;
+    ev.preventDefault();
+    try { mapEl.setPointerCapture(ev.pointerId); } catch {}
+    start = pt(ev);
+    box.style.display = "block";
+    box.style.left = start.x + "px"; box.style.top = start.y + "px";
+    box.style.width = "0px"; box.style.height = "0px";
+  });
+  mapEl.addEventListener("pointermove", (ev) => {
+    if (!on || !start) return;
+    const p = pt(ev);
+    box.style.left = Math.min(start.x, p.x) + "px";
+    box.style.top = Math.min(start.y, p.y) + "px";
+    box.style.width = Math.abs(p.x - start.x) + "px";
+    box.style.height = Math.abs(p.y - start.y) + "px";
+  });
+  mapEl.addEventListener("pointerup", (ev) => {
+    if (!on || !start) return;
+    const p = pt(ev), s = start; start = null; box.style.display = "none";
+    const x0 = Math.min(s.x, p.x), y0 = Math.min(s.y, p.y);
+    const x1 = Math.max(s.x, p.x), y1 = Math.max(s.y, p.y);
+    if (x1 - x0 < 5 && y1 - y0 < 5) return;   // タップ扱い（誤爆回避）
+    const feats = map.queryRenderedFeatures([[x0, y0], [x1, y1]], { layers: ["b-tgt"] });
+    const ids = [...new Set(feats.map((f) => f.properties.id))];
+    if (!ids.length) { hint.textContent = "囲んだ範囲に調査対象はありませんでした"; return; }
+    addManyToPlan(ids);
+    hint.textContent = `${ids.length} 棟を調査計画に追加しました（左下トレイ →「QRで渡す」）`;
+  });
+  mapEl.addEventListener("pointercancel", () => { start = null; box.style.display = "none"; });
+})();
+
 // --- 共有（更新候補 CSV/GeoJSON を Web Share API でファイル共有） -----------
 // 対応端末（navigator.canShare でファイル共有が可能）でだけボタンを出す。
 function canShareFiles() {
