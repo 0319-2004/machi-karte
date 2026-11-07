@@ -16,6 +16,16 @@
 
 ---
 
+## 2026-11-07 Phase 10 評価レポート：make eval で docs/results.md を再生成
+
+- 背景 / きっかけ：デモと README に載せる数字を、推測なし・出典つきで1枚にまとめ、再現可能にしたい。
+- 判断：`eval/results.py`（`make eval` の最後に実行）で `docs/results.md` を生成。数字は2系統に分ける。
+  1. **再計算**（毎回 DB から）：削減率（`ingest.pipeline.summarize`）、階数精度（`estimate.storeys.evaluate_storeys`）、用途ベースライン（`eval.baselines.run_bands`）、現地確認棟数（`candidates.unresolvable`）、処理時間（`confirmations` を `/api/metrics` と同式で）。
+  2. **記録値**（課金を伴う一度きりの実測＝再計算しない。出典の日付・再現コマンドを表に併記）：Claude 用途・階数検証の判断不能率・断定誤0件・近傍(c)との差・各費用（decisions.md 2026-11-04/05）。全棟推定費用は `data/derived/claude_infer_log.jsonl` があれば集計、無ければ「未実施」と明記。
+- 付随の小改修：`eval/holdout.py` の接続を `DATA_DIR` 対応に（`api/db.py` と整合。全 eval が共有）。`eval/baselines.run_bands(con=...)` で接続を外から渡せるように（レポート生成で1接続に束ねる。渡した con は閉じない）。
+- 根拠：生成値が decisions.md の実測と一致することを確認（削減 91.4%、階数 不明群重み 69.5%/95.5%、用途 不明群重み a52.6/b60.9/c62.3、現地確認 521）。
+- 影響範囲：`eval/results.py`（新規）、`docs/results.md`（生成物）、`Makefile`（eval に1行追加）、`eval/holdout.py`・`eval/baselines.py`（小改修）、`README.md`（評価節を追加）。API・DB スキーマは不変。
+
 ## 2026-11-07 フロントを「ランディング＋地図アプリ」に分割（デモ演出を入り口に）
 
 - 背景 / きっかけ：従来は入口がいきなり地図アプリ（`index.html`）だった。デモで見せたい「57,780→4,982 に減る瞬間」を入口で演出したく、トップページを分けた。

@@ -10,11 +10,14 @@ DuckDB の eval_split テーブルに保存する。
 """
 from __future__ import annotations
 
+import os
 import random
 
 import duckdb
 
-DB_PATH = "data/machikarte.duckdb"
+# DB のパスは DATA_DIR から解決する（api/db.py と同じ約束。既定 ./data）。
+DATA_DIR = os.environ.get("DATA_DIR", "./data")
+DB_PATH = os.path.join(DATA_DIR, "machikarte.duckdb")
 VERSION = "2025"
 SEED = 42
 HOLDOUT_FRAC = 0.20

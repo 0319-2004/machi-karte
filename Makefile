@@ -47,10 +47,12 @@ fetch-mediapipe:
 	@echo "取得完了（web/vendor/mediapipe/wasm/）"
 
 # 既知棟での精度検証（階数の完全一致/±1階、用途ベースライン）
+# 最後に docs/results.md（デモ/README 用の評価レポート）を再生成する
 eval:
 	uv run python -m eval.holdout
 	uv run python -m estimate.storeys --eval
 	uv run python -m eval.baselines
+	uv run python -m eval.results
 
 # Claude API で不明群の用途・階数を推定し candidates(source='image') に投入
 # 費用注意：既定20棟。全件は LIMIT=--all、モデルは CLAUDE_MODEL（.env）

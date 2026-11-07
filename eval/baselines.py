@@ -159,17 +159,20 @@ def run() -> None:
 BAND_NEIGHBOR_K = 5
 
 
-def run_bands(k: int = BAND_NEIGHBOR_K) -> dict:
+def run_bands(k: int = BAND_NEIGHBOR_K, con=None) -> dict:
     """ベースライン (a)(b)(c) を高さ帯別に出す。
 
     - (a) 最頻値 / (b) 近傍の用途（k近傍）/ (c) 近傍＋高さ±3m
     - 帯ごとに holdout 棟数・不明群(is_target)棟数・正解率を並べる
     - 不明群の高さ分布で重み付けした正解率（「不明群に近い条件での実力」）を1行
+
+    con を渡すとその接続を使う（レポート生成で1接続に束ねるため。既定は自前接続）。
     """
     from .common import (BAND_LABELS, NeighborModel, band_of, load_known,
                          target_band_weights, weighted_accuracy)
 
-    con = connect()
+    owns_con = con is None            # 自分で開いた接続だけを閉じる（渡された con は閉じない）
+    con = con or connect()
     d = load_known(con)
     tr = d["split"] == "train"
     ho = d["split"] == "holdout"
@@ -231,7 +234,8 @@ def run_bands(k: int = BAND_NEIGHBOR_K) -> dict:
     print("  （重み＝不明群の高さ帯構成比：" +
           " ".join(f"{b}={weights[b]*100:.0f}%" for b in BAND_LABELS) + "）")
 
-    con.close()
+    if owns_con:
+        con.close()
     return {"band_acc": band_acc, "weights": weights,
             "weighted": {"a": wa, "b": wb, "c": wc}, "tgt_counts": tgt_counts}
 
