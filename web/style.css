@@ -345,7 +345,14 @@ html, body { margin: 0; height: 100%; background: var(--k-bg);
   font-size: 12px; background: var(--k-elev); color: var(--k-mut); font-family: var(--k-mono); }
 #pm-copy { flex: 0 0 auto; padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer;
   background: var(--k-cyan); color: #04212a; font-weight: 700; font-size: 12px; }
-.pm-note { margin: 6px 0 0; font-size: 11.5px; color: var(--k-dim); line-height: 1.5; }
+.pm-warn { margin: 0 0 12px; padding: 9px 11px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+  background: rgba(255,106,43,0.12); border: 1px solid var(--k-target); color: #ffcbb0; text-align: left; }
+.pm-warn.hidden { display: none; }
+.pm-base { margin: 10px 0 0; text-align: left; }
+.pm-base label { display: block; font-size: 11px; color: var(--k-mut); margin-bottom: 4px; }
+.pm-base input { width: 100%; padding: 8px; border: 1px solid var(--k-line-2); border-radius: 6px;
+  font-size: 12px; background: var(--k-elev); color: var(--k-fg); font-family: var(--k-mono); }
+.pm-note { margin: 10px 0 0; font-size: 11.5px; color: var(--k-dim); line-height: 1.5; }
 
 /* 調査計画の進捗一覧 */
 .pl-box { text-align: left; max-width: 420px; }

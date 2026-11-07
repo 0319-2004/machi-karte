@@ -125,9 +125,14 @@
       <h3>調査計画を保存しました</h3>
       <p class="pm-title" id="pm-title"></p>
       <p class="pm-lead">スマホのカメラで QR を読み取ると、この計画の棟が現地調査モードで開きます。</p>
+      <div class="pm-warn hidden" id="pm-warn"></div>
       <div class="pm-qr" id="pm-qr"></div>
       <div class="pm-url"><input id="pm-url" type="text" readonly />
         <button id="pm-copy" title="URL をコピー">コピー</button></div>
+      <div class="pm-base">
+        <label for="pm-base-input">公開URL（スマホから開けるアドレス。トンネル利用時に設定）</label>
+        <input id="pm-base-input" type="text" inputmode="url" placeholder="https://xxxx.trycloudflare.com" />
+      </div>
       <p class="pm-note">進捗（何棟終わったか）は「調査計画 → 進捗」で確認できます。</p>
     </div>
   </div>

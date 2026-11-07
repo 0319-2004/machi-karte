@@ -798,9 +798,7 @@ document.getElementById("pt-save").addEventListener("click", async () => {
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
-    // 受け渡しURL は PC のいまのオリジンで作る（LAN/トンネル越しでもスマホが辿れる）
-    const url = location.origin + "/survey.html?plan=" + encodeURIComponent(d.plan_id);
-    showPlanModal(d, url);
+    showPlanModal(d);
   } catch (e) {
     alert("調査計画の保存に失敗しました：" + e.message);
   } finally {
@@ -808,10 +806,22 @@ document.getElementById("pt-save").addEventListener("click", async () => {
   }
 });
 
-function showPlanModal(plan, url) {
-  // 既定タイトルは「調査計画（N棟）」で棟数を含む。カスタム名のときだけ棟数を添える。
-  document.getElementById("pm-title").textContent =
-    /（\d+棟）\s*$/.test(plan.title) ? plan.title : `${plan.title}（${plan.count}棟）`;
+// 受け渡しURL のベース（スマホから開けるアドレス）。
+// 既定は PC のいまのオリジン。ただし localhost / LAN 内だとスマホから開けないので、
+// モーダルの入力でトンネルの公開URLを設定できる（localStorage に記憶）。
+const PLAN_BASE_LS = "mk.desk.planBase";
+let lastPlanId = null;
+function planBase() {
+  const saved = (localStorage.getItem(PLAN_BASE_LS) || "").trim().replace(/\/+$/, "");
+  return saved || location.origin;
+}
+// スマホ（別端末）から到達できないオリジンか（localhost / ループバック / プライベートLAN）
+function isUnreachableOrigin(o) {
+  return /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/i.test(o);
+}
+function renderPlanQR(planId) {
+  const base = planBase().replace(/\/+$/, "");
+  const url = base + "/survey.html?plan=" + encodeURIComponent(planId);
   document.getElementById("pm-url").value = url;
   const box = document.getElementById("pm-qr");
   box.innerHTML = "";
@@ -823,8 +833,31 @@ function showPlanModal(plan, url) {
   } catch {
     box.textContent = "QR を生成できませんでした（URL をコピーして渡してください）";
   }
+  const warn = document.getElementById("pm-warn");
+  if (isUnreachableOrigin(base)) {
+    warn.textContent = "⚠ この URL は localhost／LAN 内アドレスのため、スマホからは開けません。" +
+      "下の「公開URL」にトンネルの https アドレス（例：https://xxxx.trycloudflare.com）を貼ってください。" +
+      "（または、この画面自体をトンネルURLで開くと自動で解決します）";
+    warn.classList.remove("hidden");
+  } else warn.classList.add("hidden");
+}
+function showPlanModal(plan) {
+  lastPlanId = plan.plan_id;
+  // 既定タイトルは「調査計画（N棟）」で棟数を含む。カスタム名のときだけ棟数を添える。
+  document.getElementById("pm-title").textContent =
+    /（\d+棟）\s*$/.test(plan.title) ? plan.title : `${plan.title}（${plan.count}棟）`;
+  const baseInput = document.getElementById("pm-base-input");
+  baseInput.value = (localStorage.getItem(PLAN_BASE_LS) || "").trim();
+  baseInput.placeholder = isUnreachableOrigin(location.origin)
+    ? "https://xxxx.trycloudflare.com" : location.origin;
+  renderPlanQR(plan.plan_id);
   planModal.classList.remove("hidden");
 }
+// 公開URL を変えたら即 QR を作り直して記憶する
+document.getElementById("pm-base-input").addEventListener("input", (e) => {
+  localStorage.setItem(PLAN_BASE_LS, e.target.value.trim());
+  if (lastPlanId) renderPlanQR(lastPlanId);
+});
 document.getElementById("pm-close").addEventListener("click", () =>
   planModal.classList.add("hidden"));
 document.getElementById("pm-copy").addEventListener("click", async () => {

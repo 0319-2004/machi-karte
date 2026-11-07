@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-11-07 QRが localhost になりスマホで開けない問題：公開URL（ベース）を設定可能に
+
+- 背景 / きっかけ：QR を読み込んでもスマホでページが開けない。原因は、PC の地図画面を `http://localhost:8000` で開いていたため、受け渡し URL が `location.origin`＝`localhost` になり、QR に localhost が載っていた（localhost はスマホ自身を指すので到達不可）。サーバーも cloudflared が割り当てる公開URLを知らないため自動解決できない。
+- 判断：QR モーダルに**「公開URL（ベース）」入力**を追加。受け渡し URL は `planBase()`＝設定があればそれ、無ければ `location.origin`。`localhost`/ループバック/プライベートLAN（10./192.168./172.16-31.）のときは**警告**を出し、トンネルの https アドレスを貼ると QR を即再生成（`localStorage: mk.desk.planBase` に記憶）。**PC 自体をトンネルURLで開けば `location.origin` が公開URLになり設定不要**。
+- 動作確認（実ブラウザ/CDP＋トンネル実アクセス）：localhost で保存→URL が localhost・警告表示。公開URL に trycloudflare を貼る→URL がトンネルに再生成・警告消え・QR再生成・記憶。トンネル経由で `survey.html?plan=<id>`・`/api/plans/<id>` とも 200。テスト計画は `make reset-plans` で一掃（確定41件は保持）。
+- 影響範囲：`web/map.html`（公開URL入力・警告要素）、`web/app.js`（`planBase`/`isUnreachableOrigin`/`renderPlanQR`/`showPlanModal` 改修・入力配線）、`web/style.css`（`.pm-warn`/`.pm-base`）、`web/README.md`。API・DB は不変。
+
+---
+
 ## 2026-11-07 現地プランのグループ分けを作り直し（上限つき）＋地名/距離表示＋ピンの重なり解消
 
 - 背景 / きっかけ：グループ分けと訪問順が噛み合わず、密集域で「46棟が3グループ」になっていた。
