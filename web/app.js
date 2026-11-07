@@ -52,12 +52,15 @@ const DEMO = document.body.classList.contains("demo");
 // 計画の紫は b-tgt 自体の色切替で表すのでここには含めない。
 const DEMO_OVERLAY_LAYERS = ["b-onsite", "b-done-onsite", "b-sel", "b-photo"];
 let targetsRevealed = !DEMO;   // デモは抽出後に true。以後は選択で b-tgt を紫に塗り替える
+// 地図で紫にする棟。計画リスト（planSel）とは別に持ち、**最初は空**＝地図を開いた
+// 直後は紫を出さない。その場で選択したとき／保存済み計画を「地図で見る」で開いたときだけ反映。
+let highlightIds = [];
 window.MK = {};   // demo.js へ渡すフック（map / 色の切り替え / カウント）
 
-// 建物色の式：計画に入っている棟は紫、それ以外は base 色（橙 or 灰）。
+// 建物色の式：紫にする棟（highlightIds）は紫、それ以外は base 色（橙 or 灰）。
 // 別レイヤを重ねず 1 レイヤの色を切り替える＝3D でも Z ファイティングが起きない。
 function planColorExpr(base) {
-  return ["case", ["in", ["get", "id"], ["literal", planSel]], COLOR_PLAN, base];
+  return ["case", ["in", ["get", "id"], ["literal", highlightIds]], COLOR_PLAN, base];
 }
 
 let stats = null;
@@ -616,7 +619,7 @@ function closeLowConfModal() { lowModal.classList.add("hidden"); }
 // 確定せず、調査計画（現地調査モードの選択リスト）に追加する（現地確認に回す）
 function queueForSurvey(id) {
   if (!id) return;
-  if (!planSel.includes(id)) { planSel.push(id); savePlanSel(); renderPlanTray(); }
+  if (!planSel.includes(id)) { planSel.push(id); savePlanSel(); renderPlanTray(); highlightSelection(); }
   surveyQueued.add(id);
   renderList();
   openNext(id);   // 確定はせず、次の優先棟へ送る
@@ -684,12 +687,12 @@ function savePlanSel() { localStorage.setItem(SURVEY_SELECTED_LS, JSON.stringify
 function togglePlan(id) {
   const i = planSel.indexOf(id);
   if (i >= 0) planSel.splice(i, 1); else planSel.push(id);
-  savePlanSel(); renderPlanTray();
+  savePlanSel(); renderPlanTray(); highlightSelection();
 }
 function addManyToPlan(ids) {
   let added = 0;
   for (const id of ids) if (!planSel.includes(id)) { planSel.push(id); added++; }
-  savePlanSel(); renderPlanTray();
+  savePlanSel(); renderPlanTray(); highlightSelection();
   const tray = document.getElementById("plan-tray");
   tray.classList.add("flash");
   setTimeout(() => tray.classList.remove("flash"), 600);
@@ -703,16 +706,16 @@ function toggleRegionPlan(ids) {
   if (already * 2 >= ids.length) {
     const before = planSel.length;
     planSel = planSel.filter((id) => !ids.includes(id));
-    savePlanSel(); renderPlanTray();
+    savePlanSel(); renderPlanTray(); highlightSelection();
     return { action: "removed", n: before - planSel.length };
   }
   let n = 0;
   for (const id of ids) if (!planSel.includes(id)) { planSel.push(id); n++; }
-  savePlanSel(); renderPlanTray();
+  savePlanSel(); renderPlanTray(); highlightSelection();
   return { action: "added", n };
 }
 
-// 計画の紫ハイライトを地図に反映（b-tgt / b-non の色式を現在の選択に合わせて塗り替える）。
+// 計画の紫ハイライトを地図に反映（b-tgt / b-non の色式を highlightIds に合わせて塗り替える）。
 // デモの抽出前（targetsRevealed=false）は灰色演出を壊さないよう触らない。
 function updatePlanLayer() {
   if (!targetsRevealed || !map.getLayer || !map.getLayer("b-tgt")) return;
@@ -720,6 +723,27 @@ function updatePlanLayer() {
   if (map.getLayer("b-non")) {
     map.setPaintProperty("b-non", "fill-extrusion-color", planColorExpr(COLOR_NON));
   }
+}
+
+// その場での計画操作（追加/解除/クリア）時に、地図の紫を今の計画リストへ同期する。
+// これを呼んだときだけ地図が紫になる＝開いた直後は紫を出さない。
+function highlightSelection() { highlightIds = planSel.slice(); updatePlanLayer(); }
+
+// 保存済み計画などの棟 ids を地図に紫で反映し、その範囲へ寄せる（進捗の「地図で見る」用）。
+function fitAndHighlight(ids) {
+  highlightIds = (ids || []).slice();
+  updatePlanLayer();
+  const set = new Set(highlightIds);
+  const b = new maplibregl.LngLatBounds();
+  let any = false;
+  for (const f of map.querySourceFeatures("buildings")) {
+    if (!set.has(f.properties.id)) continue;
+    const g = f.geometry;
+    const rings = g.type === "Polygon" ? g.coordinates
+      : g.type === "MultiPolygon" ? g.coordinates.flat() : [];
+    for (const ring of rings) for (const c of ring) { b.extend(c); any = true; }
+  }
+  if (any) map.fitBounds(b, { padding: 80, pitch: 0, duration: 900, maxZoom: 17 });
 }
 
 const planTray = document.getElementById("plan-tray");
@@ -752,7 +776,7 @@ function clearPlan() {
   if (!planSel.length) return;
   planSel.length = 0;          // 同じ配列参照のまま空に（localStorage も []）
   savePlanSel();
-  renderPlanTray();            // 件数・紫ハイライト（b-tgt の色）もここで戻る
+  renderPlanTray(); highlightSelection();   // 件数・紫ハイライト（b-tgt の色）もここで戻る
   const b = document.getElementById("btn-plan");   // 確認カードを開いていれば表示を戻す
   if (b) { b.classList.remove("on"); b.textContent = "＋ 調査計画に追加（現地で確認）"; }
 }
@@ -833,8 +857,17 @@ async function loadPlans() {
         `<div class="pl-top"><span class="pl-title">${p.title}</span>` +
         `<span class="pl-frac">${p.done} / ${p.total} 棟</span></div>` +
         `<div class="pl-bar"><span style="width:${pct}%"></span></div>` +
-        `<div class="pl-meta">${p.created_at}${by}　<a href="/survey.html?plan=${p.plan_id}" ` +
-        `target="_blank" rel="noopener">現地調査で開く ↗</a></div>`;
+        `<div class="pl-meta">${p.created_at}${by}　` +
+        `<button type="button" class="pl-view">地図で見る</button>　` +
+        `<a href="/survey.html?plan=${p.plan_id}" target="_blank" rel="noopener">現地調査で開く ↗</a></div>`;
+      // 「地図で見る」：この計画の棟だけを地図に紫で反映して寄せる（保存済みは押したときだけ出す）
+      row.querySelector(".pl-view").addEventListener("click", async () => {
+        try {
+          const d = await (await fetch(`/api/plans/${p.plan_id}`)).json();
+          plansModal.classList.add("hidden");
+          fitAndHighlight(d.building_ids || []);
+        } catch { alert("計画を読み込めませんでした"); }
+      });
       box.appendChild(row);
     }
   } catch (e) { box.innerHTML = "<p class='pl-empty'>進捗を取得できませんでした。</p>"; }

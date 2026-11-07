@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-11-07 計画の紫は開いた直後に出さない＋デモ初期化コマンド（make demo-reset）
+
+- 背景 / きっかけ：localStorage に残った計画（321棟）が**地図を開いた直後から紫**で出てしまい、デモの「オレンジだけ→その場で選ぶ」流れを邪魔していた。デモ前に状態をきれいにするコマンドも欲しい。
+- 判断（1：紫を出す条件）：地図の紫を、計画リスト `planSel`（トレイ/QR/localStorage）とは**別の `highlightIds`（初期値 空）**で塗るようにした。`planColorExpr` は `highlightIds` を見る。
+  - **開いた直後**：`planSel` は localStorage から復元してトレイには出すが、`highlightIds` は空なので**地図は紫を出さない**（オレンジだけ）。
+  - **その場の操作**（囲む/確認カードの追加/区分追加/現地確認リスト/クリア）のときだけ `highlightSelection()` が `highlightIds=planSel` に同期して紫にする。
+  - **保存済み計画**：進捗一覧に「地図で見る」を追加。押すと `GET /api/plans/{id}` の棟を `highlightIds` に入れて紫で反映＋その範囲へ寄せる（`fitAndHighlight`）。選択（planSel）は変えない。
+- 判断（2：初期化コマンド）：`api/schema.py` に `reset_plans()` と CLI `--reset-plans` / `--reset-demo` を追加。`--reset-demo` は確定履歴・計測＋調査計画をまとめて消す（`candidates`/`buildings` は残す）。`Makefile` に `reset-plans` を追加し、`demo-reset` を `--reset-demo` 実行に変更。localStorage の紫は画面の「クリア」で消す旨を明記。
+- 動作確認：(1) 実ブラウザ/CDP＝localStorage に10棟仕込み→読込直後は紫0・トレイ10、囲むと紫27・トレイ27、クリアで0/0。進捗「地図で見る」で保存済み6棟が紫（選択は変わらず0）。コンソールエラー0。(2) DBコピーで `--reset-demo`＝plans1→0・confirmations172→0・buildings不変。ライブは `make reset-plans` でテスト計画を一掃（確定41件は保持）。
+- 影響範囲：`web/app.js`（`highlightIds`・`planColorExpr`・`highlightSelection`・`fitAndHighlight`・各 mutator・進捗の「地図で見る」）、`web/style.css`（`.pl-view`）、`api/schema.py`（`reset_plans`・CLI）、`Makefile`（`reset-plans`・`demo-reset`）、`web/README.md`。確定・推定・出力の内容は不変。
+
+---
+
 ## 2026-11-07 PCの範囲選択も「2回囲むと解除」に（スマホと同じトグル）
 
 - 背景 / きっかけ：PC の囲み選択は追加のみで、既に紫の棟を範囲で外せなかった（個別「外す」か全体「クリア」のみ）。スマホ（survey.html）と同じく、同じ所を2度囲んだら解除したい。

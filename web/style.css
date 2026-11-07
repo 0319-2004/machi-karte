@@ -362,6 +362,9 @@ html, body { margin: 0; height: 100%; background: var(--k-bg);
 .pl-meta { font-size: 11px; color: var(--k-dim); }
 .pl-meta a { color: var(--k-cyan); text-decoration: none; }
 .pl-meta a:hover { text-decoration: underline; }
+.pl-view { border: 1px solid var(--k-purple); background: transparent; color: #c79bff;
+  border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.pl-view:hover { background: rgba(176,107,255,0.14); }
 
 /* =========================================================================
    配布デモの段階表示（body.demo + stage-0 / stage-1 / stage-2）

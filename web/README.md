@@ -38,6 +38,8 @@ PC（`map.html`）で選んだ棟を**調査計画**としてサーバーに保�
 - グループ分け：**11棟以上**のときだけ 200m 圏でグループ化する。**10棟以下は1グループ**にまとめ、1本のルート（Google マップ、上限10地点）で全棟を順に回れる。
 - 進捗：トレイの「進捗」で保存済み計画の **何棟中何棟終わったか**を見る（`GET /api/plans`）。進捗は
   `survey_plans` に状態を持たず、`confirmations` との突き合わせで都度数える（現地・机上どちらの確定でも「調査済」）。
+- 地図の紫：**開いた直後は紫を出さない**（オレンジの調査対象だけ）。その場で選択した棟、または進捗一覧の
+  **「地図で見る」**で開いた保存済み計画のときだけ紫で反映する。消すときは「クリア」かもう一度囲んで解除。
 
 ## 共有（Web Share API）
 
@@ -48,6 +50,13 @@ PC（`map.html`）で選んだ棟を**調査計画**としてサーバーに保�
 `api`（FastAPI）が `/` で配信するので、`make serve` 後に http://localhost:8000/ を開く（紹介ページ）。
 建物データ画面は http://localhost:8000/map.html 、現地調査モードは http://localhost:8000/survey.html 。
 （`/survey/` は現地写真の保存先 `data/survey/` のマウントなので、UI は `survey.html` を開く）
+
+## デモ前の初期化
+
+`make demo-reset` で**調査計画（`survey_plans`）と確定履歴・計測（`confirmations`/`open_events`）をまとめて消す**
+（`candidates`/`buildings` は残す）。計画だけなら `make reset-plans`、確定だけなら `make reset-confirmations`。
+※稼働中サーバーは DB をロックするので、停止してから実行する。
+※地図の「紫（計画）」はブラウザの localStorage なので、画面左下トレイの**「クリア」**で消す。
 
 ## 音声入力（試験的）について
 

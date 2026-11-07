@@ -123,6 +123,11 @@ def reset_confirmations(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("DELETE FROM open_events")
 
 
+def reset_plans(con: duckdb.DuckDBPyConnection) -> None:
+    """調査計画だけを消す（candidates/confirmations/buildings は触らない）。"""
+    con.execute("DELETE FROM survey_plans")
+
+
 def _connect(db_path: str = DB_PATH) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(db_path)
     con.execute("LOAD spatial;")
@@ -134,13 +139,23 @@ def main() -> None:
     p.add_argument("--db", default=DB_PATH)
     p.add_argument("--reset-confirmations", action="store_true",
                    help="確定履歴と計測だけ消す（デモ撮り直し用）")
+    p.add_argument("--reset-plans", action="store_true",
+                   help="調査計画だけ消す")
+    p.add_argument("--reset-demo", action="store_true",
+                   help="デモ用：確定履歴・計測＋調査計画をまとめて消す")
     args = p.parse_args()
 
     con = _connect(args.db)
     ensure_tables(con)
-    if args.reset_confirmations:
+    done = []
+    if args.reset_demo or args.reset_confirmations:
         reset_confirmations(con)
-        print("確定履歴と計測（confirmations / open_events）を消去した。")
+        done.append("確定履歴・計測（confirmations / open_events）")
+    if args.reset_demo or args.reset_plans:
+        reset_plans(con)
+        done.append("調査計画（survey_plans）")
+    if done:
+        print("消去した: " + " / ".join(done))
     else:
         print("テーブルを用意した: candidates / confirmations / evidence / "
               "open_events / survey_plans")

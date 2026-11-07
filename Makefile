@@ -1,5 +1,5 @@
 .PHONY: ingest ingest-2023 schema estimate version-diff geojson serve tunnel eval export test \
-        reset-confirmations demo-reset pipeline claude-infer claude-eval onsite
+        reset-confirmations reset-plans demo-reset pipeline claude-infer claude-eval onsite
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
 VERSION ?= 2025
@@ -87,10 +87,17 @@ test:
 reset-confirmations:
 	uv run python -m api.schema --reset-confirmations
 
-# デモのリセット（reset-confirmations の別名）。確定を消すと優先度リストは
-# 西新宿（都庁1km圏）を先頭に、毎回同じ並びに戻る。初期表示も都庁なので画面と一致する。
-demo-reset: reset-confirmations
-	@echo "デモをリセットした：西新宿を先頭に、毎回同じ並びから開始できる"
+# 調査計画だけを消す（confirmations/candidates/buildings は残す）
+reset-plans:
+	uv run python -m api.schema --reset-plans
+
+# デモのリセット：確定履歴・計測＋調査計画をまとめて消す（candidates/buildings は残す）。
+# 確定を消すと優先度リストは西新宿（都庁1km圏）を先頭に、毎回同じ並びに戻る。
+# ※地図の「紫（計画）」はブラウザ側 localStorage なので、画面の「クリア」で消す。
+# ※稼働中サーバーは DB をロックするため、停止してから実行する。
+demo-reset:
+	uv run python -m api.schema --reset-demo
+	@echo "デモをリセットした：調査計画と確定履歴を消去。西新宿を先頭に毎回同じ並びから開始できる"
 
 # 取り込み〜推定を一気に通す（2025 ingest 済み前提。schema→estimate→版間差分→geojson）
 pipeline: schema estimate ingest-2023 version-diff geojson
