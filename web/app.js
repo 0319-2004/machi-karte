@@ -823,7 +823,7 @@ async function loadPlans() {
   const box = document.getElementById("map-box");
   const btn = document.getElementById("region-toggle");
   const hint = document.getElementById("region-hint");
-  let on = false, start = null;
+  let on = false, start = null, savedCam = null;
   const pt = (ev) => {
     const r = mapEl.getBoundingClientRect();
     return { x: ev.clientX - r.left, y: ev.clientY - r.top };
@@ -835,9 +835,21 @@ async function loadPlans() {
     hint.classList.toggle("hidden", !on);
     hint.textContent = "ドラッグで囲んだ調査対象を計画に追加します";
     mapEl.classList.toggle("region-on", on);
-    // ドラッグを矩形選択に使うため、地図のパン/ボックスズームを止める
-    if (on) { map.dragPan.disable(); map.boxZoom.disable(); }
-    else { map.dragPan.enable(); map.boxZoom.enable(); }
+    if (on) {
+      // ドラッグを矩形選択に使うため、地図のパン/ボックスズームを止める
+      map.dragPan.disable(); map.boxZoom.disable();
+      // 囲みやすいよう、真上からの俯瞰（ピッチ0・北上）へギュインと切り替える
+      savedCam = { pitch: map.getPitch(), bearing: map.getBearing() };
+      map.easeTo({ pitch: 0, bearing: 0, duration: 650, easing: (t) => t * (2 - t) });
+    } else {
+      map.dragPan.enable(); map.boxZoom.enable();
+      // 解除したら元の3D視点に戻す
+      if (savedCam) {
+        map.easeTo({ pitch: savedCam.pitch, bearing: savedCam.bearing,
+                     duration: 650, easing: (t) => t * (2 - t) });
+        savedCam = null;
+      }
+    }
     start = null; box.style.display = "none";
   }
   btn.addEventListener("click", () => setMode(!on));
