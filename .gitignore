@@ -33,3 +33,7 @@ node_modules/
 # MediaPipe の WASM（各約9MBと大きいので git 管理外。`make fetch-mediapipe` で取得）
 # モデル(.tflite)とローダ(.mjs/.js)は小さいのでリポジトリに含める
 web/vendor/mediapipe/wasm/*.wasm
+
+# macOS
+.DS_Store
+**/.DS_Store
