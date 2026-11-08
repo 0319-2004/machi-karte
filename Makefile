@@ -1,4 +1,4 @@
-.PHONY: render render-preview ingest ingest-2023 schema estimate version-diff geojson serve tunnel eval export test \
+.PHONY: render render-preview render-anim ingest ingest-2023 schema estimate version-diff geojson serve tunnel eval export test \
         reset-confirmations reset-plans demo-reset pipeline claude-infer claude-eval onsite
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
@@ -113,3 +113,8 @@ render:
 # 下見（40%解像度・低サンプル。data/derived/render/preview/）
 render-preview:
 	$(RENDER_PY) -m render.scene --shot all --samples 16 --scale 40 --out data/derived/render/preview
+
+# 動画（カメラを寄せながら不明群を灯す。data/derived/render/<ANIM>.mp4。ffmpeg が必要）
+ANIM ?= kabukicho_reveal
+render-anim:
+	$(RENDER_PY) -m render.anim --anim $(ANIM)

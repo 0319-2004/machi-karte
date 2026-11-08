@@ -266,8 +266,12 @@ def build_ground(cx, cy, zmin, bsel, pad=600.0):
 
 
 # --- 材質・光・カメラ ---
-def _material(name, fog_color, fog_density, color=None, rough=0.75, fog_strength=1.0):
-    """拡散面＋距離霧（空気遠近）。color 省略時は面の属性 col を使い、属性 emit で発光させる。"""
+def _material(name, fog_color, fog_density, color=None, rough=0.75, fog_strength=1.0, reveal=False):
+    """拡散面＋距離霧（空気遠近）。color 省略時は面の属性 col を使い、属性 emit で発光させる。
+
+    reveal=True のときは、属性 col_base（強調前の色）から col へ、値ノード「reveal」（0→1）で
+    移り変わる。動画で不明群を途中から灯すのに使う（render/anim.py）。
+    """
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -278,15 +282,34 @@ def _material(name, fog_color, fog_density, color=None, rough=0.75, fog_strength
     if color is None:
         attr = nodes.new("ShaderNodeAttribute")
         attr.attribute_name = "col"
-        links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
+        color_out = attr.outputs["Color"]
         em = nodes.new("ShaderNodeAttribute")
         em.attribute_name = "emit"
-        links.new(attr.outputs["Color"], bsdf.inputs["Emission Color"])
         mul = nodes.new("ShaderNodeMath")
         mul.operation = "MULTIPLY"
         mul.inputs[1].default_value = 2.5
         links.new(em.outputs["Fac"], mul.inputs[0])
-        links.new(mul.outputs[0], bsdf.inputs["Emission Strength"])
+        emit_out = mul.outputs[0]
+        if reveal:
+            val = nodes.new("ShaderNodeValue")
+            val.name = "reveal"
+            val.outputs[0].default_value = 1.0
+            base = nodes.new("ShaderNodeAttribute")
+            base.attribute_name = "col_base"
+            mixc = nodes.new("ShaderNodeMix")
+            mixc.data_type = "RGBA"
+            links.new(val.outputs[0], mixc.inputs["Factor"])
+            links.new(base.outputs["Color"], mixc.inputs["A"])
+            links.new(attr.outputs["Color"], mixc.inputs["B"])
+            color_out = mixc.outputs["Result"]
+            mul2 = nodes.new("ShaderNodeMath")
+            mul2.operation = "MULTIPLY"
+            links.new(emit_out, mul2.inputs[0])
+            links.new(val.outputs[0], mul2.inputs[1])
+            emit_out = mul2.outputs[0]
+        links.new(color_out, bsdf.inputs["Base Color"])
+        links.new(color_out, bsdf.inputs["Emission Color"])
+        links.new(emit_out, bsdf.inputs["Emission Strength"])
     else:
         bsdf.inputs["Base Color"].default_value = color
     shader = bsdf.outputs[0]
