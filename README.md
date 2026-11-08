@@ -14,20 +14,59 @@ PLATEAU のような 3D 都市モデルがあっても、属性が欠けた建�
 
 設計の正本は [`docs/design.md`](docs/design.md)。
 
-## デモを見る最短手順
+## 動かして確認する（審査員向け）
 
-> **前提：実データ（PLATEAU 等）の取得が必要です。** 権利の都合で生データはリポジトリに含めていません（`data/` は git 管理外）。
+権利の都合で生データ（PLATEAU 等）はリポジトリに含めていません（`data/` は git 管理外）。
+そのため確認経路を2つ用意しました。**まず A で数分で確認でき、地図デモまで見たい場合に B へ進みます。**
 
-1. **依存を入れる**：`uv sync`（Python 3.12 + [uv](https://docs.astral.sh/uv/)）
-2. **環境変数**：`cp .env.example .env` → `ANTHROPIC_API_KEY` を記入（Claude 機能を使う場合。地図・絞り込みだけなら無くても動く）
-3. **データを置く**：[`data/README.md`](data/README.md) の「取得記録」に従い、PLATEAU 新宿区 2025/2023 年度版 CityGML・Overture Places・OSM POI を `data/raw/` 以下に配置
-4. **取り込み**：`make ingest`（CityGML を DuckDB へ。不明群 4,982 棟を抽出）
-5. **起動**：`make serve` → ブラウザで **http://localhost:8000/**（トップが絞り込みのデモ、`/survey.html` が現地調査）
-6. （任意）`make eval` で評価レポート [`docs/results.md`](docs/results.md) を再生成／`make export` で更新候補リストを出力
+### 前提
+
+- **Python 3.12 + [uv](https://docs.astral.sh/uv/)** が入っていること（`uv --version` で確認）
+- 依存のインストール：
+
+```bash
+uv sync                 # 依存をインストール（.venv を作成）
+cp .env.example .env     # 必要なら ANTHROPIC_API_KEY を記入（A では不要）
+```
+
+### A. データ取得なしで確認する（数分・API キー不要）
+
+実データを落とさずに、コードが通ることを確認できる経路です。
+
+```bash
+uv run pytest           # fixtures だけで完結するテスト（28 件パス）
+```
+
+CityGML の解析・センチネル値の正規化・更新候補の出力・レポート生成などを、同梱の小さなサンプル GML（`tests/fixtures/sample_bldg.gml`）で検証します。実データの DuckDB を必要とする評価テスト 3 件だけは、データ未取得だとスキップ/失敗します（それ以外は通ります）。
+
+> 設計と実データで分かった事実は [`docs/design.md`](docs/design.md) / [`docs/decisions.md`](docs/decisions.md)、精度・費用の実測値は [`docs/results.md`](docs/results.md) にまとまっています。コードを落とさずに「何を・どう作ったか」を読むならここが早いです。
+
+### B. 地図デモをフルで動かす（実データの取得が必要）
+
+1. **データを置く** — 配置先とファイル名は決まっています（取得元・版・ライセンスの正本は [`data/README.md`](data/README.md)）。
+
+   - **PLATEAU 新宿区 CityGML**（手動ダウンロード）：G空間情報センターから
+     [2025年度版](https://www.geospatial.jp/ckan/dataset/plateau-13104-shinjuku-ku-2025)（`13104_shinjuku-ku_pref_2025_citygml_1_op`）と
+     [2023年度版](https://www.geospatial.jp/ckan/dataset/plateau-13104-shinjuku-ku-2023)（版間差分用）の zip を取得し、`udx/bldg/*.gml`・`codelists/`・`metadata/` を
+     それぞれ `data/raw/plateau/2025/`・`data/raw/plateau/2023/` に展開（テクスチャ `*_appearance/*.jpg` は不要）。
+   - **Overture Places**（CLI・bbox は新宿区 +100m）：
+
+     ```bash
+     uv run overturemaps download --type=place \
+       --bbox=139.661321,35.665555,139.751553,35.734288 \
+       -f geoparquet -o data/raw/poi/overture_places.parquet
+     ```
+   - **OpenStreetMap POI / 建物**：Overpass API で同 bbox を取得し、`data/raw/poi/osm_poi.geojson`・`data/raw/poi/osm_buildings.geojson` に保存（取得条件の詳細は [`data/README.md`](data/README.md)）。
+
+2. **取り込み**：`make ingest`（2025年度 CityGML を DuckDB へ。不明群を抽出し件数を照合。版間差分や仮推定まで一気に通すなら `make ingest && make ingest-2023 && make pipeline`）
+3. **起動**：`make serve` → ブラウザで **http://localhost:8000/**（トップが絞り込みのデモ、`/survey.html` が現地調査、`/map.html` が確認画面）
+4. （任意）`make eval` で評価レポート [`docs/results.md`](docs/results.md) を再生成／`make export` で更新候補リスト（CSV / GeoJSON）を出力
+
+**スマホ実機で見る場合**：`make tunnel`（HTTPS トンネルを張って URL/QR を表示。現地調査の位置情報・カメラ・音声には HTTPS が必要）。
+
+> Claude 機能（用途・階数の推定文、判断不能の自己申告、現地要約、レポート文章、音声メモの振り分け）を試す場合は `.env` に `ANTHROPIC_API_KEY` と `CLAUDE_MODEL` を設定し、`make claude-infer`（既定 20 棟・費用はログに記録）等を実行します。地図・絞り込み・確定の基本フローは API キー無しでも動きます。
 
 **デモ動画**：（準備中 — 公開後にここへ URL を記載）
-
-スマホ実機で見る場合は `make tunnel`（HTTPS トンネルを張って URL/QR を表示。現地調査の位置情報・カメラ・音声には HTTPS が必要）。
 
 ## テーマとの対応
 

@@ -34,6 +34,9 @@ node_modules/
 # モデル(.tflite)とローダ(.mjs/.js)は小さいのでリポジトリに含める
 web/vendor/mediapipe/wasm/*.wasm
 
+# 動画・デモ素材（大きいのでリポジトリに入れない。README からは外部URLで参照する）
+videos/
+
 # macOS
 .DS_Store
 **/.DS_Store

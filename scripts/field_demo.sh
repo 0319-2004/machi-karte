@@ -38,7 +38,7 @@ echo "▶ Macのスリープを抑止中（電源アダプタをつないでお�
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
   echo "▶ サーバーは既に :$PORT で起動済み（そのまま使う）"
 else
-  echo "▶ サーバーを起動中（uvicorn :$PORT）…"
+  echo "▶ サーバーを起動中（uvicorn :${PORT}）…"
   uv run uvicorn api.main:app --port "$PORT" >"$LOGDIR/server.log" 2>&1 &
   SERVER_PID=$!
   # 応答するまで待つ（最大30秒）
@@ -85,7 +85,7 @@ echo
 echo "  トップ（デモ）：   $URL/"
 echo "════════════════════════════════════════════════════════"
 echo
-echo "  ※ PC操作画面は必ず上の公開URL（$URL）で開くこと。"
+echo "  ※ PC操作画面は必ず上の公開URL（${URL}）で開くこと。"
 echo "    localhost で開くと QR が localhost になりスマホで開けません。"
 if command -v qrencode >/dev/null 2>&1; then
   echo
@@ -98,7 +98,7 @@ fi
 if command -v open >/dev/null 2>&1; then
   open "$MAP_URL" >/dev/null 2>&1 || true
   echo
-  echo "▶ PCの操作画面を公開URLで開きました（$MAP_URL）"
+  echo "▶ PCの操作画面を公開URLで開きました（${MAP_URL}）"
 fi
 echo
 echo "起動中。Ctrl-C で全部停止します。本番が終わるまで止めないこと。"
