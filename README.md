@@ -66,7 +66,7 @@ CityGML の解析・センチネル値の正規化・更新候補の出力・レ
 
 > Claude 機能（用途・階数の推定文、判断不能の自己申告、現地要約、レポート文章、音声メモの振り分け）を試す場合は `.env` に `ANTHROPIC_API_KEY` と `CLAUDE_MODEL` を設定し、`make claude-infer`（既定 20 棟・費用はログに記録）等を実行します。地図・絞り込み・確定の基本フローは API キー無しでも動きます。
 
-**デモ動画**：[`videos/demo.mp4`](videos/demo.mp4)（リポジトリに同梱。地図の絞り込み〜確定〜出力の流れを収録）
+**デモ動画**：**https://youtu.be/O6oawtnAtRw** （地図の絞り込み〜確定〜出力の流れを収録）。リポジトリ同梱版は [`videos/demo.mp4`](videos/demo.mp4)。
 
 ## テーマとの対応
 
