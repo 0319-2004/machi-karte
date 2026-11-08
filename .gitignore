@@ -26,6 +26,7 @@ data/cache/
 # Python
 __pycache__/
 .venv/
+.venv-render/
 
 # Node
 node_modules/

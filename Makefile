@@ -1,4 +1,4 @@
-.PHONY: ingest ingest-2023 schema estimate version-diff geojson serve tunnel eval export test \
+.PHONY: render render-preview ingest ingest-2023 schema estimate version-diff geojson serve tunnel eval export test \
         reset-confirmations reset-plans demo-reset pipeline claude-infer claude-eval onsite
 
 # CityGML を解析し DuckDB に取り込む（版は VERSION で指定、既定 2025）
@@ -102,3 +102,14 @@ demo-reset:
 # 取り込み〜推定を一気に通す（2025 ingest 済み前提。schema→estimate→版間差分→geojson）
 pipeline: schema estimate ingest-2023 version-diff geojson
 	@echo "pipeline 完了：candidates / year_built / buildings.geojson を更新した"
+
+# PLATEAU 新宿区を Blender（Cycles）で静止画にする（data/derived/render/*.png）
+# bpy は Python 3.13 用のため別 venv（render/README.md）。RENDER_PY で差し替え可
+RENDER_PY ?= .venv-render/bin/python
+render:
+	$(RENDER_PY) -m render.extract
+	$(RENDER_PY) -m render.scene --shot all --samples 64
+
+# 下見（40%解像度・低サンプル。data/derived/render/preview/）
+render-preview:
+	$(RENDER_PY) -m render.scene --shot all --samples 16 --scale 40 --out data/derived/render/preview

@@ -20,5 +20,6 @@
 - **出力ファイル（更新候補リスト）には、使ったデータ源のライセンスが及ぶ。** 特に `source` が `poi` / `osm_building` の行は OpenStreetMap 由来の情報を含むため、**ODbL（Open Database License）の対象になり得る**。出力を配布・公開する場合は ODbL の帰属・継承義務に従うこと。
   - なお `source` が `neighbor` の行は PLATEAU の既知棟（近傍）由来であり、OSM の対象ではない。`height` / `version_diff` も PLATEAU 由来。
 - **徒歩経路の取得には OSRM を使う。** デモは公開サーバー（`router.project-osrm.org`、BSD-2-Clause）を使うが、本番は自前サーバーを立てる前提。**現在地（座標）は経路取得のためだけに使い、保存しない。OSRM に送るのは座標のみ。** OSRM の経路は OpenStreetMap（ODbL）由来なので、経路ジオメトリを配布・公開する場合は ODbL の帰属・継承義務に従うこと。
+- **静止画（`render/`、Blender で描画）は PLATEAU の 3D 都市モデル（建築物 LOD1/LOD2）から作る。** 画像を README・スライド等に載せる場合は「出典：国土交通省 Project PLATEAU」を添える。Blender（GPL）はツールとして使うだけで、描画結果の画像には GPL は及ばない。
 - **顔の自動ぼかしは MediaPipe Face Detector（Apache-2.0, © The MediaPipe Authors）** を使う。ローダ・モデル・WASM は **CDN ではなく自サーバー（`/vendor/mediapipe/`）から配信**し、**写真そのものはサーバーに送らず端末内で推論**する（詳細は [`web/vendor/mediapipe/README.md`](../web/vendor/mediapipe/README.md)）。Apache-2.0 は本リポジトリの MIT とも、ODbL・CC BY-SA のデータ/画像との併用とも整合する（コピーレフト・非商用の制約は無い）。
 - **調査計画の QR コード生成は qrcode-generator（MIT, © 2009 Kazuhiko Arase）** を使う。**CDN ではなく自サーバー（`/vendor/qrcode/`）から配信**する（デモ中に通信が不安定でも動くように）。QR には受け渡し URL（計画IDのみ）を載せ、建物属性や位置情報は含めない。
