@@ -35,7 +35,9 @@ node_modules/
 web/vendor/mediapipe/wasm/*.wasm
 
 # 動画・デモ素材（大きいのでリポジトリに入れない。README からは外部URLで参照する）
-videos/
+videos/*
+# ただし提出デモ動画 1 本だけは審査員向けに含める（約49MB・GitHub の 100MB 上限内）
+!videos/demo.mp4
 
 # macOS
 .DS_Store
